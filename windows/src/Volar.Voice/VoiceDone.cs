@@ -364,11 +364,13 @@ public static class VoiceDone
     /// <summary>
     /// Scores every open task's title against <paramref name="query"/> (the utterance with cue
     /// words stripped), keeping only tasks at/above <see cref="CandidateFloor"/>. An empty
-    /// <see cref="QueryContext.Tokens"/> (e.g. the whole utterance WAS the cue phrase, like
-    /// a bare "xong", or every remaining word is a filler token absent from every open task's
-    /// title — <c>df == 0</c>, see <see cref="BuildQueryContext"/>) always yields no candidates —
-    /// this is the "done-phrase present but nothing matched" case the contract requires to surface
-    /// as empty candidates rather than a guess.
+    /// <see cref="QueryContext.Tokens"/> — the whole utterance WAS the cue phrase, like a bare
+    /// "xong" — always yields no candidates, the "done-phrase present but nothing matched" case the
+    /// contract requires to surface as empty candidates rather than a guess. An utterance whose
+    /// every word is unknown to the corpus (<c>df == 0</c>) reaches the same outcome one step
+    /// later, at coverage 0, rather than short-circuiting here: since anh Khôi's 2026-08-11 call
+    /// those tokens are kept for scoring, so they are no longer filtered out of
+    /// <see cref="QueryContext.Tokens"/> (see <see cref="BuildQueryContext"/>).
     /// </summary>
     private static List<ScoredCandidate> ScoredTitleCandidates(
         QueryContext query,
@@ -667,17 +669,35 @@ public static class VoiceDone
     /// ordered, cue-stripped tokens.
     /// </summary>
     /// <remarks>
-    /// Drops any token with <c>documentFrequency == 0</c> — a word that appears in NO open task's
-    /// title carries no discriminating signal (nothing to distinguish it FROM), and dropping it is
-    /// what lets filler words ("vụ", "cái", "chuyện") get silently absorbed without maintaining a
-    /// stopword list: "xong vụ hợp đồng rồi" against an open task titled "...hợp đồng..." drops
-    /// "vụ" (df 0) and scores on {hợp, đồng} alone. If every token gets dropped this way (or the
-    /// utterance was entirely cue words to begin with), <see cref="QueryContext.Tokens"/>
-    /// comes back empty and every candidate scores 0 — the "done-phrase present but nothing
-    /// matched" case.
+    /// Applies the file header's TWO POLICIES for a <c>documentFrequency == 0</c> token — anh Khôi
+    /// chốt 2026-08-11, closing the contradiction where this method's code dropped such tokens
+    /// while the header and <see cref="QueryContext.Tokens"/> said scoring keeps them:
     ///
-    /// <see cref="QueryContext.PhraseMatchEligible"/> requires at least 2 surviving tokens: a
-    /// single word trivially "contains" itself as a phrase, and letting a lone word (however
+    /// SCORING (<see cref="Tokens"/>/<see cref="SumIdf"/>): KEPT. A word appearing in NO open task
+    /// is not the absence of signal, it is the strongest available signal that the utterance is
+    /// about something else — "viết BÁO CÁO xong rồi" against a lone open "Viết email" must NOT
+    /// match, and "báo"/"cáo" being absent from the whole corpus is the only thing that says so.
+    /// Such a token gets the maximum idf the formula can yield (<c>ln(1 + N)</c>, <c>df</c> simply
+    /// being 0) and can only ever sit in <see cref="ScoreCandidate"/>'s coverage denominator: by
+    /// construction no candidate contains it, so it cannot reach a numerator.
+    ///
+    /// PHRASE-MATCH NEEDLE (<see cref="Phrase"/>): still DROPPED. That shortcut favors precision,
+    /// and one filler word ("vụ", "cái", "chuyện") breaking an otherwise verbatim phrase hit is a
+    /// false negative worth avoiding. The two policies are asymmetric ON PURPOSE, for opposite
+    /// reasons — do not "tidy" them into agreement.
+    ///
+    /// The price anh Khôi accepted: a filler word now dilutes the coverage denominator, so
+    /// "xong vụ hợp đồng rồi" against "...hợp đồng thuê văn phòng" lands as a CANDIDATE rather
+    /// than a one-tap. Wide at the candidate tier, narrow at one-tap — the same trade the rest of
+    /// this file already makes (see <see cref="DistinctiveIdf"/>'s remarks).
+    ///
+    /// <see cref="QueryContext.Tokens"/> now comes back empty only when the utterance was entirely
+    /// cue words. The "every remaining word is unknown to the corpus" case no longer short-circuits
+    /// here — it flows through scoring and lands at coverage 0, i.e. the same "done-phrase present
+    /// but nothing matched" outcome by the honest route.
+    ///
+    /// <see cref="QueryContext.PhraseMatchEligible"/> requires at least 2 surviving needle tokens:
+    /// a single word trivially "contains" itself as a phrase, and letting a lone word (however
     /// common — "gọi", "làm") trigger the same shortcut that a real multi-word phrase hit does
     /// would drag in unrelated tasks and could even collapse them to a false one-tap.
     /// </remarks>
@@ -686,11 +706,14 @@ public static class VoiceDone
         IReadOnlyDictionary<string, int> documentFrequency,
         int corpusSize)
     {
-        var scorableOrdered = orderedReferenceTokens.Where(documentFrequency.ContainsKey).ToList();
-        var scorableTokens = new HashSet<string>(scorableOrdered, StringComparer.Ordinal);
-        var sumIdf = scorableTokens.Sum(token => Idf(token, documentFrequency, corpusSize));
-        var phrase = string.Join(' ', scorableOrdered);
-        return new QueryContext(scorableTokens, sumIdf, phrase, scorableTokens.Count >= 2);
+        var tokens = new HashSet<string>(orderedReferenceTokens, StringComparer.Ordinal);
+        var sumIdf = tokens.Sum(token => Idf(token, documentFrequency, corpusSize));
+
+        var needleOrdered = orderedReferenceTokens.Where(documentFrequency.ContainsKey).ToList();
+        var needleTokens = new HashSet<string>(needleOrdered, StringComparer.Ordinal);
+        var phrase = string.Join(' ', needleOrdered);
+
+        return new QueryContext(tokens, sumIdf, phrase, needleTokens.Count >= 2);
     }
 
     /// <summary>
@@ -738,8 +761,10 @@ public static class VoiceDone
 
     /// <summary>
     /// The IDF containment fallback: <c>coverage = Σ idf(matched) / Σ idf(query)</c> — the fraction
-    /// of the (already <c>df == 0</c>-filtered) query's IDF-weighted mass that this candidate's
-    /// token set covers. Also returns <c>MatchRatio = Σ idf(matched) / Σ idf(candidateTokens)</c>,
+    /// of the query's IDF-weighted mass that this candidate's token set covers. The query side is
+    /// UNFILTERED: a <c>df == 0</c> token carries maximum idf and weighs on the denominator alone,
+    /// which is what stops an utterance about something else from reaching full coverage on a
+    /// shared common word (see <see cref="BuildQueryContext"/>'s TWO POLICIES remarks). Also returns <c>MatchRatio = Σ idf(matched) / Σ idf(candidateTokens)</c>,
     /// <see cref="SelectCandidates"/>'s tie-break signal (how little of the CANDIDATE, not the
     /// query, is unmatched filler — a tighter, more specific title ranks above a looser one at the
     /// same coverage).
