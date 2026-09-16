@@ -808,14 +808,19 @@ final class AppState {
     /// True when capture failed because on-device recognition is unavailable (Dictation off) and
     /// the user hasn't consented to server recognition yet — drives the popover's hint + consent UI.
     private(set) var pendingServerConsent = false
-    /// One-time cloud-parse privacy opt-in (T024/contract R5): `nil` = never asked. Persisted so
-    /// the decision survives relaunch; a decline is permanent (never asked again, never routes to
-    /// Cloud) until the user changes it in Settings. Read by `DefaultCloudParseGate.isOptedIn()`
-    /// below — the REAL seam with `IntentRouter` is that injected `CloudParseGate` protocol
+    /// Cloud-parse opt-OUT flag (T024/contract R5): `nil` = never answered, which since
+    /// 2026-09-06 means YES — cloud parsing is the default on every entry point and nothing asks
+    /// (see `proceedToCapture`). Persisted, so an explicit `false` (Settings ▸ parse engine, or
+    /// the onboarding toggle switched off) survives relaunch and still keeps every transcript on
+    /// the device. Read by `DefaultCloudParseGate.isOptedIn()` below — the REAL seam with
+    /// `IntentRouter` is that injected `CloudParseGate` protocol
     /// (`Sources/Parsing/IntentParsing.swift`, landed), not a convention this file has to guess at.
     private(set) var cloudParseConsent: Bool?
     /// Drives the popover's one-time cloud-parse consent row (mirrors `pendingServerConsent`'s
-    /// reuse of the `.error` capture state for a non-error consent prompt).
+    /// reuse of the `.error` capture state for a non-error consent prompt). DORMANT since
+    /// 2026-09-06: `proceedToCapture` no longer sets it, so the row never renders — kept (with
+    /// `resolveCloudConsent` and its `PopoverView`/`CaptureSheet` UI) so re-arming the prompt, if
+    /// an App Store review ever demands one, is a one-line change rather than a rebuild.
     private(set) var pendingCloudConsent = false
     /// The transcript awaiting a decision in `pendingCloudConsent`, resumed by `resolveCloudConsent`.
     private var pendingParseTranscript: String?
@@ -2159,6 +2164,7 @@ final class AppState {
             // FIX 6: done-state just flipped (the exact field `isDesired` filters on) — no-store
             // fallback (previews/tests) still needs this so `calendarSync`'s self-guards see it.
             syncCalendarMirror()
+            resumeParkedTaskIfNeeded(justCompleted: id)
             return
         }
         let before = tasks
@@ -2178,12 +2184,19 @@ final class AppState {
                 scheduler?.scheduleReminders(taskId: id)
             }
         }
-        notifyEligibilityAndScheduleResurface(before: before, now: now)
+        let newlyEligible = notifyEligibilityAndScheduleResurface(before: before, now: now)
         // FIX 6: done-state changed (T037's completion funnel — `confirmVoiceDone`'s `.complete`,
         // `sweepComplete`, and the plain UI toggle all route through here), and `TaskStore.toggle`
         // can also reset a recurring task back to `.todo` with a FRESH deadline in place — both are
         // exactly the fields `CalendarSync.isDesired`/`eventWindow` key off of.
         syncCalendarMirror()
+        // Park & resume: if what just got ticked was the interruption, hand the spotlight back to
+        // whatever the user set aside for it. Runs after `tasks` is refreshed so it reads the real
+        // post-toggle state (a recurring task that `TaskStore.toggle` reset back to `.todo` is
+        // correctly NOT treated as finished).
+        resumeParkedTaskIfNeeded(justCompleted: id)
+        // ...and the dependency half: anything parked waiting on THIS task is workable again.
+        resumeParkedTaskIfUnblocked(newlyEligible)
     }
 
     /// Store-backed path: `TaskStore.delete` strips the id from every other task's `.taskDone`
@@ -2213,6 +2226,7 @@ final class AppState {
         if !newlyEligible.isEmpty {
             scheduler?.notifyUnblocked(taskIds: newlyEligible)
         }
+        resumeParkedTaskIfUnblocked(newlyEligible)
         scheduleNextResurface(from: tasks.map { $0.snapshot() }, now: now)
         // FIX 6: membership change — `reconcile(tasks:)`'s own "no longer desired" pass (which a
         // deleted task's id will now fall into, since it's not in `tasks` at all anymore) is what
@@ -2402,6 +2416,11 @@ final class AppState {
             return cycleMessage(for: cycle)
         }
         let before = tasks
+        // Park & resume, dependency half: if the task being blocked is the one on screen right now,
+        // it can't be worked on any more — set it aside (and drop any pin, which the `openTasks`-
+        // based `dashboardActiveTask` would otherwise keep honouring for a blocked task) so
+        // `resumeParkedTaskIfUnblocked` hands it back the moment `dependsOn` clears.
+        let blockingTheSpotlitTask = dashboardActiveTask?.id == id
         do {
             try store.addCondition(.taskDone(dependsOn), to: id)
         } catch {
@@ -2413,6 +2432,10 @@ final class AppState {
         // §1.3: gỡ/thêm một cạnh có thể mở khoá task khác ngay — same three-step refresh tail
         // every other store-backed mutator in this file uses (`addTask`/`toggleDone`/`deleteTask`).
         tasks = store.fetchAll()
+        if blockingTheSpotlitTask, let blocked = tasks.first(where: { $0.id == id }) {
+            if dashboardSwitchOverrideID == id { dashboardSwitchOverrideID = nil }
+            park(blocked, note: "Paused \(clock().formatted(.dateTime.hour().minute())) — waiting on \u{201C}\(titleFor(dependsOn) ?? "another task")\u{201D}")
+        }
         notifyEligibilityAndScheduleResurface(before: before, now: now)
         syncCalendarMirror()
         return nil
@@ -2840,19 +2863,15 @@ final class AppState {
     /// mirroring `captureSession`) so a user who hits Esc mid-parse can never have a stale result
     /// land back on a popup they've already closed/reopened.
     ///
-    /// CLOUD-CONSENT DIFFERENCE FROM THE VOICE PATH (deliberate — task brief): voice capture routes
-    /// through `proceedToCapture`, which interrupts with the one-time cloud-parse consent prompt
-    /// (`pendingCloudConsent`/`captureState = .error`) the FIRST time a parse is ever attempted.
-    /// This method deliberately does NOT do that — a tiny "type one line" popup is the wrong
-    /// surface to interrupt with a privacy decision; the whole point of this feature is "type →
-    /// Add task → done" with no PRIVACY pause (unrelated to the separate confirm-card review pause
-    /// a complex parse can still trigger, Việc 4 above). Instead this calls `router.parse` directly.
-    /// `IntentRouter` still applies its own `cloudGate.isOptedIn()` (+ `isOnline()`) gate
-    /// internally regardless of caller (see `IntentRouter.parse` in `IntentParsing.swift`), so an
-    /// un-opted-in user simply gets on-device (Heuristic/FoundationModel) parsing here — nothing
-    /// about their text ever reaches Cloud without the SAME consent the voice flow's one-time sheet
-    /// (or the Settings parse-engine picker) already gates. The user can opt in from either of
-    /// those two existing surfaces; this popup just never asks.
+    /// CLOUD CONSENT (2026-09-06: no longer a difference from the voice path). This method has
+    /// always called `router.parse` directly, on the grounds that a tiny "type one line" popup is
+    /// the wrong surface to interrupt with a privacy decision. Voice used to differ — it paused on
+    /// a one-time consent prompt — but `proceedToCapture` no longer does, so both entry points now
+    /// behave identically: parse straight away, cloud by default. `IntentRouter` still applies its
+    /// own `cloudGate.isOptedIn()` (+ `isOnline()`) gate internally regardless of caller (see
+    /// `IntentRouter.parse` in `IntentParsing.swift`), so a user who has explicitly opted OUT in
+    /// Settings/onboarding still gets on-device parsing here and their text still never leaves the
+    /// machine.
     func submitTextCapture() {
         // Defensive: the "Add task" button/`.onSubmit` are both disabled/no-ops while `.saving`
         // per `TextCaptureView`, but this guards the method itself against a double-submit race
@@ -3131,17 +3150,14 @@ final class AppState {
     /// matching task, capture instead" escape hatch, T036) can resume the SAME transcript through
     /// the exact same gate rather than duplicating it.
     private func proceedToCapture(transcript: String) {
-        guard cloudParseConsent != nil else {
-            // Never asked: pause for the consent sheet instead of parsing yet. Reuses the same
-            // `.error`-state-as-consent-prompt pattern as `pendingServerConsent` above (see
-            // `PopoverView.errorActionsRow`) rather than adding a new `CaptureState` case (frozen
-            // §4 enum).
-            pendingParseTranscript = transcript
-            pendingCloudConsent = true
-            captureErrorDetail = "Volar can parse on-device for free, or use a cloud AI for trickier phrasing. Cloud parsing sends only the TEXT of what you said (never audio) to our server — see contracts/parse-proxy.md."
-            captureState = .error
-            return
-        }
+        // anh Khôi chốt 2026-09-06: cloud parsing is the default for EVERY entry point, so the
+        // one-time consent pause is gone — voice now behaves exactly like typed capture always
+        // has (see `submitTextCapture`'s own "CLOUD-CONSENT DIFFERENCE" note, which this change
+        // resolves by making both paths identical). Opting OUT is still fully supported and still
+        // honoured on every path: Settings ▸ parse engine / the onboarding toggle write `false` to
+        // `cloudParseConsentKey`, which `DefaultCloudParseGate.isOptedIn()` reads before any
+        // request leaves the device. `pendingCloudConsent` and `resolveCloudConsent` are kept (and
+        // still wired in `PopoverView`/`CaptureSheet`) but are no longer reachable from this path.
         runParse(transcript: transcript)
     }
 
@@ -3407,6 +3423,7 @@ final class AppState {
         if !newlyEligible.isEmpty {
             scheduler?.notifyUnblocked(taskIds: newlyEligible)
         }
+        resumeParkedTaskIfUnblocked(newlyEligible)
         scheduleNextResurface(from: tasks.map { $0.snapshot() }, now: now)
     }
 
@@ -5345,6 +5362,113 @@ final class AppState {
         }
     }
 
+    // MARK: - Park & resume ("đang làm A, B chen ngang" — anh Khôi 2026-09-06)
+    //
+    // `switchFocusTask`/`switchDashboardActiveTask` above answer "give me something ELSE"; the
+    // engine picks the target. This answers the other half — "I have to do THIS one right now" —
+    // and remembers where to come back to. No new mechanism: the target is pinned with the SAME
+    // `dashboardSwitchOverrideID` Switch already uses, the task being left is marked with the SAME
+    // `recordSwitchAway`, and what it was mid-way through is whatever the user typed into
+    // `resumeNote` (`FocusOverlay`'s field, `setResumeNote` below), which `FocusOverlay` already
+    // re-displays when the task comes back.
+
+    /// The task set aside by `focusTaskNow`, or `nil`. Deliberately ONE level, not a stack:
+    /// parking B while B itself was the interruption overwrites this and the first task falls back
+    /// into normal `nextTask()` contention (where it was already sitting anyway — parking changes
+    /// nothing about the task's own data).
+    /// ponytail: single slot; make it an array only if real users report nested interruptions.
+    private(set) var parkedTaskID: UUID?
+
+    /// "Do this one now." Pins `id` as the active/focus task and remembers whatever was spotlit
+    /// so `resumeParkedTaskIfNeeded` can hand it back once the interruption is finished. A no-op
+    /// for an unknown/closed id, or for the task already spotlit.
+    func focusTaskNow(_ id: UUID) {
+        guard openTasks.contains(where: { $0.id == id }) else { return }
+        if let current = dashboardActiveTask, current.id != id {
+            recordSwitchAway(from: current)
+            park(current, note: "Paused \(clock().formatted(.dateTime.hour().minute())) — switched to \u{201C}\(titleFor(id) ?? "another task")\u{201D}")
+        }
+        dashboardSwitchOverrideID = id
+        if focusActive, let index = openTasks.firstIndex(where: { $0.id == id }) {
+            focusIndex = index
+        }
+    }
+
+    /// Called from `toggleDone` — the single funnel every completion path routes through (the UI
+    /// toggle, `confirmVoiceDone`, `sweepComplete`, the notification action's own refresh), so this
+    /// is written once rather than at each of them.
+    ///
+    /// Only fires when the task just completed is the one that INTERRUPTED (i.e. the pinned one).
+    /// Ticking some unrelated row off the list must not yank the spotlight around, which is why
+    /// this checks `dashboardSwitchOverrideID` rather than just "something got done".
+    private func resumeParkedTaskIfNeeded(justCompleted id: UUID) {
+        guard let parked = parkedTaskID,
+              dashboardSwitchOverrideID == id,
+              tasks.first(where: { $0.id == id })?.done == true
+        else { return }
+        restoreSpotlight(to: parked)
+    }
+
+    /// The OTHER way a parked task becomes workable again: it was set aside because it was WAITING
+    /// on something (`addTaskDependency` parks it), and that something just cleared — the blocker
+    /// got ticked off, deleted, or the external "cái kia xong rồi" was confirmed. Every one of
+    /// those mutations already computes `eligibilityDiff`, which names exactly the tasks that
+    /// flipped from blocked to workable, so this is the same one-slot handback keyed off that list
+    /// instead of off a completion id. No polling, no new state.
+    private func resumeParkedTaskIfUnblocked(_ newlyEligible: [UUID]) {
+        guard let parked = parkedTaskID, newlyEligible.contains(parked) else { return }
+        restoreSpotlight(to: parked)
+    }
+
+    private func titleFor(_ id: UUID) -> String? { tasks.first { $0.id == id }?.title }
+
+    /// Sets a task aside and — ONLY when nothing is written down yet — leaves an automatic
+    /// breadcrumb (anh Khôi chốt 2026-09-06). It answers "dừng lúc nào, vì việc gì", not "làm tới
+    /// đâu"; that second half is the user's own line, typed over this one in the parked-note row
+    /// (`TodayView`) or `FocusOverlay`'s field. A note the user wrote themselves always outranks a
+    /// generated one and is never overwritten — this fills a blank, it does not maintain a log.
+    private func park(_ task: TaskItem, note: String) {
+        parkedTaskID = task.id
+        guard (task.resumeNote ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        setResumeNote(task.id, note)
+    }
+
+    /// Shared tail of both resume triggers: clears the slot and hands the spotlight back.
+    private func restoreSpotlight(to parked: UUID) {
+        parkedTaskID = nil
+        // Parked task deleted/completed/archived while away: drop the pin entirely and let the
+        // engine pick again, rather than pinning something that no longer exists.
+        guard let index = openTasks.firstIndex(where: { $0.id == parked }) else {
+            dashboardSwitchOverrideID = nil
+            return
+        }
+        dashboardSwitchOverrideID = parked
+        if focusActive { focusIndex = index }
+    }
+
+    /// Writes the "where I left off" line. Store-backed via the EXISTING `mergeIntoExisting` (same
+    /// convention `recordSwitchAway` uses — no new `TaskStore` method), in-memory otherwise.
+    /// Deliberately does NOT run the reminders/eligibility/calendar tail `updateTask` does:
+    /// `resumeNote` feeds none of them. It DOES nudge sync, so the note follows the user to their
+    /// other machine — which is the whole point of writing it down.
+    func setResumeNote(_ id: UUID, _ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value: String? = trimmed.isEmpty ? nil : trimmed
+        guard let store else {
+            if let index = tasks.firstIndex(where: { $0.id == id }) {
+                tasks[index].resumeNote = value
+            }
+            return
+        }
+        store.mergeIntoExisting(id) { task in
+            var updated = task
+            updated.resumeNote = value
+            return updated
+        }
+        tasks = store.fetchAll()
+        notifySyncOfLocalEdit()
+    }
+
     // MARK: - Appearance controls (Settings → Appearance)
 
     /// FIX 4: sets the accent color and persists it, so it survives relaunch — same "mutate +
@@ -5711,7 +5835,12 @@ final class AppState {
     /// `VolarCore.eligibilityDiff(before:after:now:calendar:)`; the actual landed signature in
     /// `VolarCore/Sources/VolarCore/Snapshots.swift` is `eligibilityDiff(before:after:now:)` — no
     /// `calendar` parameter. This wiring follows the real, already-compiled signature.
-    private func notifyEligibilityAndScheduleResurface(before: [TaskItem], now: Date) {
+    ///
+    /// Returns the newly-eligible ids so a caller that also cares about them (park & resume's
+    /// `resumeParkedTaskIfUnblocked`) reads the diff this already computed instead of running a
+    /// second one — same "exactly one `eligibilityDiff` per mutation" rule `deleteTask` follows.
+    @discardableResult
+    private func notifyEligibilityAndScheduleResurface(before: [TaskItem], now: Date) -> [UUID] {
         let beforeSnapshot = before.map { $0.snapshot() }
         let afterSnapshot = tasks.map { $0.snapshot() }
         let newlyEligible = VolarCore.eligibilityDiff(before: beforeSnapshot, after: afterSnapshot, now: now)
@@ -5719,6 +5848,7 @@ final class AppState {
             scheduler?.notifyUnblocked(taskIds: newlyEligible)
         }
         scheduleNextResurface(from: afterSnapshot, now: now)
+        return newlyEligible
     }
 
     /// T032/FR-017: finds the earliest strictly-future `.afterDate` across the CURRENT snapshot
@@ -6220,8 +6350,14 @@ final class DefaultCloudParseGate: CloudParseGate, @unchecked Sendable {
         monitor.cancel()
     }
 
+    /// anh Khôi chốt 2026-09-06: an UNSET key now means "yes" — cloud parsing is the default for
+    /// every entry point and nothing pauses to ask any more (`AppState.proceedToCapture`). Only an
+    /// explicit `false` (Settings ▸ parse engine, or the onboarding toggle switched off, both
+    /// through `AppState.setParseEngine`) keeps text on-device, and it still gates every request
+    /// exactly as before. `object(forKey:) as? Bool`, not `bool(forKey:)`: the latter cannot tell
+    /// "never answered" from "answered no", which is the whole distinction this default rests on.
     func isOptedIn() async -> Bool {
-        UserDefaults.standard.bool(forKey: AppState.cloudParseConsentKey)
+        UserDefaults.standard.object(forKey: AppState.cloudParseConsentKey) as? Bool ?? true
     }
 
     /// Scoped `withLock` rather than a manual `lock()`/`defer { unlock() }` pair: `NSLock`'s

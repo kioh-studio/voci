@@ -1,4 +1,4 @@
-// Sources/Parsing/IntentParsing.swift — IntentParser protocol, IntentRouter (FM -> Cloud ->
+// Sources/Parsing/IntentParsing.swift — IntentParser protocol, IntentRouter (Cloud -> FM ->
 // title-only floor; see the 2026-07-28 comment on `IntentRouter.init`/`parse` for why the old
 // Heuristic bottom tier is disconnected, not deleted), and the shared raw-output decode/
 // validation helper both FoundationModelParser (T020) and CloudParser (T021) funnel through
@@ -64,7 +64,7 @@ protocol CloudParseGate: Sendable {
 
 // MARK: - IntentRouter (T019)
 
-/// Routes FM (on-device, if available) -> Cloud (opted-in + online, credential available) ->
+/// Routes Cloud (opted-in + online, credential available) -> FM (on-device, if available) ->
 /// title-only floor. ALWAYS returns a usable, non-empty `[ParsedTask]`: any route failure
 /// (unavailable, decode violation, transport error, 401/5xx) falls through silently to the next
 /// tier; the title-only floor is unconditional and always available. The 10-task cap is enforced
@@ -126,7 +126,7 @@ final class IntentRouter: IntentParser {
     ///     macOS < 26, non-Apple-Silicon, or when the on-device model itself isn't available
     ///     (probe never crashes; see `FoundationModelParser.makeIfAvailable()`).
     ///   - cloud: `nil` disables the Cloud tier entirely (e.g. no `ParseCredentialProvider`
-    ///     composite wired up yet) — router falls straight from FM to the title-only floor.
+    ///     composite wired up yet) — router falls straight to FM, then the title-only floor.
     ///   - cloudGate: `nil` also disables Cloud (never attempt Cloud without an explicit gate
     ///     that can assert consent).
     ///
@@ -166,34 +166,46 @@ final class IntentRouter: IntentParser {
         // the cheap-and-correct way to write it either way.
         let defaultDurationMinutes = Self.currentDefaultDurationMinutes()
 
-        if let fm {
-            let result = await fm.parse(transcript, now: now, openTaskTitles: titles)
-            if !result.isEmpty {
-                lastRoute = .foundationModel
-                // `applyStartTimeDerivation` runs here AND at the Cloud return below — same
-                // static function, one implementation, so the two tiers can never diverge on this
-                // rule (see the function's own doc comment for the full rationale).
-                return Self.applyStartTimeDerivation(Self.cap(result), defaultMinutes: defaultDurationMinutes)
-            }
-        }
-
+        // anh Khôi chốt 2026-09-06: Cloud is the DEFAULT tier for every entry point (voice, ⌃⌥T,
+        // ⌘K), so it runs FIRST and FM became the offline/quota fallback beneath it. Before this,
+        // FM answered first whenever Apple Intelligence was available, which meant Cloud (and
+        // therefore `taskRefs`/`updates`, which only Cloud can produce) never ran at all on an
+        // eligible Mac.
+        var cloudSaidNothingActionable = false
         if let cloud, let cloudGate, await cloudGate.isOptedIn(), await cloudGate.isOnline() {
             switch await cloud.parseDetailed(transcript, now: now, openTaskTitles: titles) {
             case .tasks(let tasks) where !tasks.isEmpty:
                 lastRoute = .cloud
+                // `applyStartTimeDerivation` runs here AND at the FM return below — same static
+                // function, one implementation, so the two tiers can never diverge on this rule
+                // (see the function's own doc comment for the full rationale).
                 return Self.applyStartTimeDerivation(Self.cap(tasks), defaultMinutes: defaultDurationMinutes)
             case .tasks:
                 // Decoded fine, but the model found no actionable task in the utterance (small
                 // talk). Reachable as of 2026-08-01 — `CloudParser.parseDetailed` used to report
                 // this same case as `.unavailable`, making this branch dead code; see that guard's
-                // comment. Falls through to the title-only floor below exactly like any other Cloud
-                // non-result: anh Khôi chốt 2026-08-01 that a captured utterance must still become
-                // something the user can see and dismiss, never silently nothing.
-                break
+                // comment. Falls through to the title-only floor below: anh Khôi chốt 2026-08-01
+                // that a captured utterance must still become something the user can see and
+                // dismiss, never silently nothing.
+                //
+                // Deliberately SKIPS the FM tier below (2026-09-06): Cloud actually looked at this
+                // utterance and said "no task here." Letting the weaker on-device tier then invent
+                // one would overrule a real verdict with a guess — the title-only floor is the
+                // honest answer. Only "Cloud never answered" (`.unavailable`/`.quotaExceeded`/
+                // opted out/offline) falls through to FM.
+                cloudSaidNothingActionable = true
             case .quotaExceeded:
                 lastCloudQuotaNote = true
             case .unavailable:
                 break
+            }
+        }
+
+        if let fm, !cloudSaidNothingActionable {
+            let result = await fm.parse(transcript, now: now, openTaskTitles: titles)
+            if !result.isEmpty {
+                lastRoute = .foundationModel
+                return Self.applyStartTimeDerivation(Self.cap(result), defaultMinutes: defaultDurationMinutes)
             }
         }
 
@@ -213,7 +225,7 @@ final class IntentRouter: IntentParser {
     }
 
     /// task_refs_v1 (anh Khôi, 2026-08-02 task-refs design): full-`ParsedCapture` sibling of
-    /// `parse` above — same FM -> Cloud -> title-only floor waterfall, same dependency-phrasing
+    /// `parse` above — same Cloud -> FM -> title-only floor waterfall, same dependency-phrasing
     /// detection, same 10-task cap, same `applyStartTimeDerivation` pass, but also carries
     /// `taskRefs`/`updates` through from the Cloud tier instead of discarding them. Deliberately
     /// NOT part of the frozen `IntentParser` protocol — mirrors `resolveCompletion` above (same
@@ -246,15 +258,11 @@ final class IntentRouter: IntentParser {
             : []
         let defaultDurationMinutes = Self.currentDefaultDurationMinutes()
 
-        if let fm {
-            let result = await fm.parse(transcript, now: now, openTaskTitles: titles)
-            if !result.isEmpty {
-                lastRoute = .foundationModel
-                let derived = Self.applyStartTimeDerivation(Self.cap(result), defaultMinutes: defaultDurationMinutes)
-                return ParsedCapture(tasks: derived, taskRefs: [], updates: [])
-            }
-        }
-
+        // Cloud-first, same rule and same rationale as `parse` above (anh Khôi 2026-09-06) — with
+        // one extra reason specific to this method: `taskRefs`/`updates` exist ONLY on the Cloud
+        // tier, so an FM-first ladder silently disabled voice task-editing on every Mac with
+        // Apple Intelligence turned on.
+        var cloudSaidNothingActionable = false
         if let cloud, let cloudGate, await cloudGate.isOptedIn(), await cloudGate.isOnline() {
             switch await cloud.parseCaptureDetailed(transcript, now: now, openTaskTitles: titles) {
             case .capture(let capture) where !capture.tasks.isEmpty || !capture.updates.isEmpty:
@@ -275,13 +283,22 @@ final class IntentRouter: IntentParser {
             case .capture:
                 // Envelope decoded fine but genuinely carries nothing (no tasks, no updates,
                 // possibly a `taskRefs` entry with nothing actionable attached to it) — same "small
-                // talk" case `parse` documents for its own `.tasks` empty-array branch; falls
-                // through to the title-only floor exactly the same way.
-                break
+                // talk" case `parse` documents for its own `.tasks` empty-array branch, including
+                // the "don't let FM overrule a real Cloud verdict" rule (see that branch's comment).
+                cloudSaidNothingActionable = true
             case .quotaExceeded:
                 lastCloudQuotaNote = true
             case .unavailable:
                 break
+            }
+        }
+
+        if let fm, !cloudSaidNothingActionable {
+            let result = await fm.parse(transcript, now: now, openTaskTitles: titles)
+            if !result.isEmpty {
+                lastRoute = .foundationModel
+                let derived = Self.applyStartTimeDerivation(Self.cap(result), defaultMinutes: defaultDurationMinutes)
+                return ParsedCapture(tasks: derived, taskRefs: [], updates: [])
             }
         }
 
@@ -296,12 +313,13 @@ final class IntentRouter: IntentParser {
     /// requires it, and `HeuristicNLParser` elsewhere still calls the matching `IntentParser`
     /// shape) but is effectively the "no extra context available" case now.
     func breakdown(title: String, notes: String?) async -> [String] {
-        if let fm {
-            let steps = await fm.breakdown(title: title, notes: notes)
-            if Self.isValidBreakdown(steps) { return steps }
-        }
+        // Cloud-first since 2026-09-06, same rule as `parse`/`parseCapture` above.
         if let cloud, let cloudGate, await cloudGate.isOptedIn(), await cloudGate.isOnline() {
             let steps = await cloud.breakdown(title: title, notes: notes)
+            if Self.isValidBreakdown(steps) { return steps }
+        }
+        if let fm {
+            let steps = await fm.breakdown(title: title, notes: notes)
             if Self.isValidBreakdown(steps) { return steps }
         }
         // anh Khôi chốt 2026-07-28: no more `HeuristicNLParser().breakdown(...)` floor here either
@@ -315,7 +333,7 @@ final class IntentRouter: IntentParser {
     }
 
     /// Context-enriched sibling of `breakdown(title:notes:)` above (anh Khôi, 2026-07-29 "richer
-    /// context" addendum) — same FM -> Cloud -> `[]` shape and same "no fabricated floor" rule,
+    /// context" addendum) — same Cloud -> FM -> `[]` shape and same "no fabricated floor" rule,
     /// but also forwards `sourceTranscript`/`deadline`/`existingSubtasks` so the model can ground
     /// steps in the user's own original words and never repeat a step already done. Deliberately a
     /// SEPARATE method rather than adding parameters to `breakdown(title:notes:)` itself: that
@@ -331,18 +349,21 @@ final class IntentRouter: IntentParser {
         deadline: Date?,
         existingSubtasks: [TaskContextSubtask]?
     ) async -> [String] {
-        if let fm {
-            let steps = await fm.breakdownWithContext(
-                title: title, notes: notes, sourceTranscript: sourceTranscript,
-                deadline: deadline, existingSubtasks: existingSubtasks
-            )
-            if Self.isValidBreakdown(steps) { return steps }
-        }
+        // Cloud-first since 2026-09-06 (same rule as `parse`); this is also the one call site the
+        // app actually uses, and the FM tier here is the hardcoded-English 5-step floor backlog.md
+        // already flags as poor — so it belongs UNDER the cloud steps, not above them.
         if let cloud, let cloudGate, await cloudGate.isOptedIn(), await cloudGate.isOnline() {
             let steps = await cloud.breakdownDetailed(
                 title: title, notes: notes, sourceTranscript: sourceTranscript,
                 deadline: deadline, existingSubtasks: existingSubtasks
             ) ?? []
+            if Self.isValidBreakdown(steps) { return steps }
+        }
+        if let fm {
+            let steps = await fm.breakdownWithContext(
+                title: title, notes: notes, sourceTranscript: sourceTranscript,
+                deadline: deadline, existingSubtasks: existingSubtasks
+            )
             if Self.isValidBreakdown(steps) { return steps }
         }
         // Same "no fabricated floor" rule as `breakdown(title:notes:)` above.

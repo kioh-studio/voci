@@ -120,6 +120,28 @@ final class CloudFirstDefaultsAndBreakdownTests: XCTestCase {
         XCTAssertEqual(state.parseEnginePreference, .cloud)
     }
 
+    // MARK: - (1b) The gate the router actually reads (anh Khôi chốt 2026-09-06)
+
+    // `parseEnginePreference` above is only the Settings DISPLAY default. The bit that decides
+    // whether a request actually leaves the device is `DefaultCloudParseGate.isOptedIn()`, which
+    // used to read `bool(forKey:)` — i.e. "never answered" behaved like "no". These two pin the
+    // new rule: unset means yes, and an explicit decline still means no.
+
+    func testCloudGateIsOptedInByDefaultWhenNeverAnswered() async {
+        // setUp cleared `cloudParseConsentKey` — a fresh install.
+        let allowed = await DefaultCloudParseGate().isOptedIn()
+
+        XCTAssertTrue(allowed, "cloud parsing is the default on every entry point now — an unanswered consent key must not disable it")
+    }
+
+    func testCloudGateHonoursAnExplicitDecline() async {
+        UserDefaults.standard.set(false, forKey: Self.cloudParseConsentKey)
+
+        let allowed = await DefaultCloudParseGate().isOptedIn()
+
+        XCTAssertFalse(allowed, "turning the parse engine to on-device in Settings/onboarding must still keep every transcript on the device")
+    }
+
     // MARK: - (2) Onboarding consent toggle writes the SAME shared flag
 
     func testSetParseEngineCloudWritesTheSharedConsentKeyTrue() {

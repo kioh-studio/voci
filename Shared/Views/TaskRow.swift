@@ -188,6 +188,13 @@ struct TaskRow: View {
         .animation(VolarMotion.press, value: isPressed)
         .contextMenu {
             Button("Break down into steps…") { appState.openBreakdown(for: task) }
+            // Park & resume (2026-09-06): the "something urgent came up, do THIS one" entry point.
+            // Switch (FocusOverlay/hero card) lets the engine pick the next task; this is how the
+            // user names it — and it remembers what was parked, so finishing this one hands the
+            // spotlight back. Hidden for a task that is already the one spotlit.
+            if !task.done, appState.dashboardActiveTask?.id != task.id {
+                Button("Do this now") { appState.focusTaskNow(task.id) }
+            }
             Button(task.done ? "Mark not done" : "Mark done") { appState.toggleDone(task.id) }
             // Archive (2026-08-24): đường DUY NHẤT để một task vào section Archived. Không phải
             // hoàn thành, không phải xoá — "tôi không làm cái này nữa nhưng đừng vứt nó". Ẩn khi

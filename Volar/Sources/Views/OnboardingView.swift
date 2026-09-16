@@ -259,8 +259,11 @@ struct OnboardingView: View {
     // would violate the project's opt-in principle and mis-state the privacy label). The toggle is
     // wired DIRECTLY to `appState.setParseEngine(_:)` — the SAME method the Settings picker uses,
     // which persists to the SAME `cloudParseConsent` / `AppState.cloudParseConsentKey` the rest of
-    // the app already reads (`parseEnginePreference`, `proceedToCapture`'s one-time consent gate,
-    // `DefaultCloudParseGate.isOptedIn()`). No second consent flag is introduced anywhere in this
+    // the app already reads (`parseEnginePreference`, `DefaultCloudParseGate.isOptedIn()`).
+    // 2026-09-06: `proceedToCapture`'s one-time consent gate is gone (cloud is the default on every
+    // entry point, unanswered = yes), so this toggle is now the only macOS surface that can write
+    // the opt-OUT — the flag it writes is still honoured on every path. No second consent flag is
+    // introduced anywhere in this
     // file — two flags that could disagree is exactly how an app ends up uploading for a user who
     // said no.
 

@@ -277,9 +277,12 @@ struct SettingsView: View {
             // chọn — cloud hiểu câu khó hơn, on-device là thứ tự chạy khi không có mạng/chưa đăng
             // nhập, và app đã tự lùi về on-device ở mọi trường hợp cloud không dùng được.
             //
-            // KHÔNG bỏ phần đồng ý gửi dữ liệu: `AppState.cloudParseConsent` và cửa sổ hỏi một
-            // lần trước lần parse ĐẦU TIÊN (`proceedToCapture`) còn nguyên, `setParseEngine` cũng
-            // vẫn còn cho onboarding gọi. Cái bỏ ở đây chỉ là chỗ CHỌN trong Settings.
+            // Cập nhật 2026-09-06 (anh Khôi chốt "auto dùng cloud parse kể cả hình thức nào"):
+            // cửa sổ hỏi một lần trước lần parse ĐẦU TIÊN đã BỎ (`proceedToCapture` gọi thẳng
+            // `runParse`), và khoá chưa trả lời giờ tính là ĐỒNG Ý (`DefaultCloudParseGate
+            // .isOptedIn()`). `AppState.cloudParseConsent`/`setParseEngine` vẫn còn — trên macOS
+            // chỗ duy nhất còn ghi được là toggle bước 3 của onboarding (bản iOS vẫn có toggle
+            // trong Settings). Muốn trả lại chỗ chọn ở đây thì thêm lại đúng một `Picker`.
             SettingsRow(label: "Recognition language", hint: "The language Volar listens for when you capture a task by voice, including Vietnamese.") {
                 Picker("", selection: Binding(
                     get: { appState.recognitionLocaleID },

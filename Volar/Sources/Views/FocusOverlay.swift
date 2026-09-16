@@ -224,14 +224,12 @@ struct FocusOverlay: View {
                 )
                     .foregroundStyle(FocusInk.textMut) // on the scrim — pinned ink, see `FocusInk`
             }
-            if let resumeNote = task.resumeNote, !resumeNote.isEmpty {
-                Text(resumeNote)
-                    .font(.system(size: 12))
-                    .foregroundStyle(FocusInk.textMut) // on the scrim — pinned ink, see `FocusInk`
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .padding(.top, 2)
-            }
+            // 2026-09-06: this line used to only DISPLAY `resumeNote`, and nothing anywhere in the
+            // app ever wrote it — so it was always empty. It is now the field you type it into,
+            // right where you are when you have to drop the task. `.id(task.id)` rebuilds the
+            // field (and its draft) when Switch/prev/next hands focus to a different task.
+            ResumeNoteField(task: task)
+                .id(task.id)
             if let transcript = task.sourceTranscript, !transcript.isEmpty {
                 Text("\u{201C}\(transcript)\u{201D}")
                     .font(.system(size: 12))
@@ -402,6 +400,32 @@ struct FocusOverlay: View {
 
 /// Small round glass icon button used for the pause/stop and prev/next controls. Private to this
 /// file — ported from `volar-focus.jsx`'s `FocusRoundBtn`.
+/// The "where I left off" line — read-only `Text` before 2026-09-06. Writes on Enter or when the
+/// field loses focus, never per keystroke, so a store-backed `setResumeNote` (which reloads
+/// `tasks`) can't run on every character.
+private struct ResumeNoteField: View {
+    @Environment(AppState.self) private var appState: AppState
+    let task: TaskItem
+    @State private var draft: String = ""
+    @FocusState private var editing: Bool
+
+    var body: some View {
+        TextField("Where you left off\u{2026}", text: $draft, axis: .vertical)
+            .textFieldStyle(.plain)
+            .font(.system(size: 12))
+            .foregroundStyle(FocusInk.textMut) // on the scrim — pinned ink, see `FocusInk`
+            .multilineTextAlignment(.center)
+            .lineLimit(2)
+            .focused($editing)
+            .onAppear { draft = task.resumeNote ?? "" }
+            .onSubmit { appState.setResumeNote(task.id, draft) }
+            .onChange(of: editing) { _, isEditing in
+                if !isEditing { appState.setResumeNote(task.id, draft) }
+            }
+            .padding(.top, 2)
+    }
+}
+
 private struct FocusRoundBtn: View {
     let icon: VolarIconName
     let title: String

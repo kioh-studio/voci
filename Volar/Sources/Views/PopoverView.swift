@@ -6,7 +6,7 @@ import VolarCore
 
 /// Ported from `design/volar-popover.jsx`'s `VolarPopover`, driven entirely by
 /// `appState.captureState` (`.idle/.recording/.parsing/.parsed/.saving/.done/.error`) instead of
-/// the JSX's local/controlled `state` prop. Sizes itself to a fixed 380pt width internally, so
+/// the JSX's local/controlled `state` prop. Sizes itself to a fixed 340pt width internally, so
 /// callers (the popover-hosting window/`NSPopover`, wired in Phase 3) just place this view.
 ///
 /// Phase 3 (T024) reworks the confirm card for `ParsedTask` v2 (contracts/parsing-contract.md):
@@ -21,7 +21,7 @@ struct PopoverView: View {
     @Environment(AppState.self) private var appState: AppState
     @State private var mounted = false
 
-    private let width: CGFloat = 380
+    private let width: CGFloat = 340
 
     var body: some View {
         let accent = appState.accent.accent
@@ -35,9 +35,18 @@ struct PopoverView: View {
             // `.dock` sitting outside `.stage`. `showTranscript`'s condition (non-idle, non-error)
             // doubles as "is there a NOW thing to light right now".
             VStack(alignment: .leading, spacing: 0) {
-                waveformSection(accent: accent)
+                // Once the confirm card is up, the 42pt wave slot holds nothing (`showWave` is
+                // recording/parsing only) except the `.done` check / `.error` copy — so it only
+                // renders in the states that actually draw something there, instead of padding
+                // the confirm panel with ~58pt of empty space.
+                if showWave || appState.captureState == .done || appState.captureState == .error {
+                    waveformSection(accent: accent)
+                }
 
-                if showTranscript {
+                // In `.parsed`/`.saving` this line is the first draft's title again ("+N more"),
+                // which the card below repeats verbatim and editably — dead weight in the state
+                // where the panel is at its tallest.
+                if showTranscript && !showParsedCard {
                     transcriptSection()
                         .transition(.opacity)
                 }
@@ -300,7 +309,7 @@ struct PopoverView: View {
     /// of the screen. // UNVERIFIED: no Swift/Xcode on this machine to confirm `NSHostingView.
     /// fittingSize` measures a bounded `ScrollView` the way this assumes (see that same doc
     /// comment's own note on exactly this risk) — verify on Mac with a 4-5 task batch.
-    private static let parsedCardMaxHeight: CGFloat = 420
+    private static let parsedCardMaxHeight: CGFloat = 300
 
     /// One `VStack` holding every confirmed draft's chip set, separated by hairlines when there's
     /// more than one (multi-task confirm: a compact reviewable set, still glance-and-dismiss).

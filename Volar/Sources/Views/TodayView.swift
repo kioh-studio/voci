@@ -239,6 +239,21 @@ struct TodayView: View {
             VStack(alignment: .leading, spacing: appState.density.sectionGap) {
                 nowSpotlight
 
+                // Park & resume (anh Khôi 2026-09-06): the ONE line about the task set aside, shown
+                // only while something is actually parked — it disappears by itself the moment the
+                // spotlight is handed back. Deliberately an editable field and not read-only text,
+                // unlike the hero's `details` right above: that field has its own editor on the
+                // detail page (two editors for one field = two places to fix it), whereas
+                // `resumeNote` has none outside `FocusOverlay`, so anyone not running a focus
+                // session had nowhere at all to type "làm tới đâu". `AppState.park` has already
+                // seeded it with a "dừng lúc nào, vì việc gì" breadcrumb; this is where that gets
+                // overwritten with the half a machine can't know.
+                if let parkedID = appState.parkedTaskID,
+                   let parked = appState.tasks.first(where: { $0.id == parkedID }) {
+                    ParkedNoteRow(task: parked)
+                        .id(parkedID)
+                }
+
                 // 006-cues-and-waiting (design.md §2 Việc B/C, §3): the two new ambient surfaces
                 // this feature adds, both "renders nothing when there's nothing to show" like every
                 // other banner in this stack. `cueBanner` prefers a just-fired `.wake` cue (set by
@@ -1313,5 +1328,48 @@ private struct WaitingModeRow: View {
                 .stroke(VolarColor.border, lineWidth: 0.5)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+
+/// The "PAUSED — <task>" row `TodayView` shows while `AppState.parkedTaskID` names something.
+/// Same write-on-Enter-or-blur contract as `FocusOverlay`'s `ResumeNoteField` (never per keystroke:
+/// `setResumeNote` hits the store and nudges sync), just themed for the window instead of the
+/// focus scrim. `.id(task.id)` at the call site is what resets `draft` when a different task
+/// becomes the parked one.
+private struct ParkedNoteRow: View {
+    @Environment(AppState.self) private var appState: AppState
+    let task: TaskItem
+    @State private var draft: String = ""
+    @FocusState private var editing: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("PAUSED — \(task.title)")
+                .font(Font.volarMono(size: 10, weight: .semibold))
+                .tracking(1.1)
+                .foregroundStyle(VolarColor.textSec)
+                .lineLimit(1)
+            TextField("Where you left off\u{2026}", text: $draft, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12.5))
+                .foregroundStyle(VolarColor.textPri)
+                .lineLimit(3)
+                .focused($editing)
+                .onAppear { draft = task.resumeNote ?? "" }
+                .onSubmit { appState.setResumeNote(task.id, draft) }
+                .onChange(of: editing) { _, isEditing in
+                    if !isEditing { appState.setResumeNote(task.id, draft) }
+                }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(VolarColor.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(VolarColor.border, lineWidth: 0.5)
+        )
     }
 }

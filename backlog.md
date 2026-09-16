@@ -1,8 +1,20 @@
 # Backlog - voci
 
-- [x] **`probe-followup.ts` ĐÃ CHẠY LẦN 1 (2026-08-21, anh Khôi cho phép, 5 call ≈ 235đ): 3 pass / 1 fail.** `storedTitle` model tự đặt ở lượt 1 = "Làm xong task dems search" (giữ nguyên "dems"), cả 3 case sau khớp lại được bằng `===`. FAIL đúng case 1 (ứng viên gộp): model trả `tasks=0`, tự quyết sửa task cũ — đúng luật prompt hiện tại, sai luật hybrid. PASS case 2 (quan hệ), 3 (không bịa liên kết), **4 (chỉ-sửa → `updates`, deadline thứ 6 đúng)** ⇒ nửa dưới hybrid đã chạy sẵn, chỉ thiếu MỘT luật ở prompt. Chưa biết case 1 model nhét gì vào `updates` (check `return` sớm) — 1 call ≈ 47đ là biết. Thay `probe-task-refs.ts` (đã xoá, 14 case, lấy lại từ git history nếu cần). 4 case: gợi ý gộp / quan hệ / task-mới / chỉ-sửa khi user nói lượt 2 về task đã tạo ở lượt 1. **Đang ĐỎ CÓ CHỦ ĐÍCH**: mã hoá luật hybrid mới nhưng prompt production chưa đổi (xem mục ngay dưới) — case 1 chắc chắn fail cho tới khi prompt sửa xong.
-- [x] **Chạy lại lần 2 (2026-08-21, anh Khôi yêu cầu sau khi set credential): 3 pass / 1 fail, KẾT QUẢ Y HỆT lần 1** — cùng case 1 fail, `storedTitle` seed vẫn ra "Làm xong task dems search". Xác nhận credential test + đường auth→quota→Gemini trên project mới `cjaamylayaylbuuhwlnz` chạy thật. Không có thông tin mới ⇒ **lần sau chỉ cần kiểm hạ tầng thì `--dry-run` + 1 call seed là đủ** (~47đ thay vì 235đ); chạy đủ 4 case chỉ khi prompt đã đổi.
+- [ ] **★★ CHỜ PHỤ THUỘC RỒI TỰ QUAY LẠI ("A chờ B xong mới làm tiếp") — ĐÃ CODE 2026-09-06, CHƯA BUILD MAC.** Nửa còn thiếu của mục park & resume ngay dưới: trước đó chỉ có "B chen ngang → B xong → về A"; giờ có thêm "A bị chặn → cái chặn nó hết → về A ngay". KHÔNG thêm state mới — `eligibilityDiff` vốn đã trả đúng danh sách task vừa từ *bị chặn* sang *làm được* ở MỌI mutation, chỉ là chưa ai dùng ngoài `notifyUnblocked`. **Đã làm:** (1) `notifyEligibilityAndScheduleResurface` giờ `@discardableResult -> [UUID]` (trả lại diff nó đã tính, không tính lần hai — đúng luật "một `eligibilityDiff` mỗi mutation"); (2) tách `restoreSpotlight(to:)` khỏi `resumeParkedTaskIfNeeded` + thêm `resumeParkedTaskIfUnblocked(_:)` dùng chung cái đuôi đó; (3) gọi nó ở 3 chỗ đã có sẵn `newlyEligible`: `toggleDone` (B tick xong), `deleteTask` (xoá luôn thằng chặn), `clearExternalCondition` ("cái kia xong rồi" bằng giọng); (4) `addTaskDependency` giờ PARK chính task vừa bị chặn nếu nó đang là task trên màn hình, và gỡ `dashboardSwitchOverrideID` — tiện thể sửa một lỗi thật: `dashboardActiveTask` lọc theo `openTasks` (= chưa done), nên pin đặt trên task bị chặn vẫn hiện task đó ở hero card. Test: 4 ca mới cuối `SharedTests/ParkAndResumeTests.swift` (store-backed, `TaskStore(inMemory: true)` + `addBatch`). **Giới hạn:** vẫn MỘT slot `parkedTaskID` — chặn task thứ hai thì task đầu rơi lại vào hàng đợi thường (đã ghi `ponytail:`). Chỉ park khi task bị chặn ĐANG là task spotlit; chặn một task nền thì không đụng gì. **VERIFY TRÊN MAC:** build xanh (`@discardableResult` + đổi kiểu trả về ở 8 call site — 7 chỗ bỏ kết quả, hợp lệ nhờ `@discardableResult`), và bấm thật: A đang làm → thêm "chờ B" → A biến khỏi hero card → tick B → A quay lại ngay.
+
+- [ ] **★★ GHI "ĐANG LÀM TỚI ĐÂU" LÚC DỪNG — anh Khôi chốt phương án (a)+(b) 2026-09-06, ĐÃ CODE, CHƯA BUILD MAC.** Trước đó `resumeNote` chỉ gõ được trong `FocusOverlay`, tức phải đang chạy focus session mới có chỗ ghi. Chốt: **breadcrumb tự động + ô gõ đè**. (1) `AppState.park(_:note:)` — mọi đường park (`focusTaskNow` và nhánh bị-chặn trong `addTaskDependency`) đi qua đây; nếu note còn TRỐNG thì ghi sẵn "Paused 14:32 — switched to «B»" / "…— waiting on «B»". **Không bao giờ đè lên chữ user tự gõ** (breadcrumb chỉ điền chỗ trống, không phải log). (2) `ParkedNoteRow` trong `TodayView.swift` — một hàng "PAUSED — «A»" + `TextField` sửa được, CHỈ hiện khi `parkedTaskID != nil` nên tự biến mất lúc spotlight trả về. Ghi lúc Enter/rời ô (không phải mỗi phím — `setResumeNote` chạm store + nudge sync), `.id(parkedID)` để đổi task là reset draft. **Vì sao là ô nhập chứ không phải text chỉ-đọc như `details` ngay trên nó:** `details` đã có editor riêng ở trang detail (hai editor cho một field = hai chỗ phải sửa), còn `resumeNote` thì ngoài `FocusOverlay` ra KHÔNG có chỗ nào gõ. Test: 2 ca mới (`ParkAndResumeTests`) — có breadcrumb khi trống, không đè khi user đã gõ. **CHƯA LÀM:** ô này chỉ có ở macOS `TodayView`; iOS + bản Windows chưa port. **VERIFY TRÊN MAC:** hàng PAUSED hiện đúng chỗ dưới card NOW, gõ + Tab ra ngoài có lưu, và nó biến mất khi task quay lại.
+
+- [ ] **★★ NGẮT GIỮA CHỪNG RỒI QUAY LẠI ("đang làm A, B chen ngang") — ĐÃ CODE 2026-09-06, CHƯA BUILD MAC.** Khảo sát tìm 5 lỗ; giải 3, cố ý không giải 2. **Đã làm:** (1) `resumeNote` giờ ghi được — `AppState.setResumeNote` (dùng `store.mergeIntoExisting` sẵn có + `notifySyncOfLocalEdit`, KHÔNG chạy đuôi reminder/calendar vì note không ảnh hưởng) + `ResumeNoteField` trong `FocusOverlay.swift` thay cho dòng `Text(resumeNote)` chỉ-đọc cũ (ghi lúc Enter/rời ô, không phải mỗi phím; `.id(task.id)` để đổi task là reset draft); (2) chọn được đích — `AppState.focusTaskNow(_:)` + một dòng "Do this now" trong `TaskRow.contextMenu`, ghim bằng chính `dashboardSwitchOverrideID` mà Switch đang dùng, task bị rời đi vẫn qua `recordSwitchAway` như cũ; (3) quay lại — field `parkedTaskID` + `resumeParkedTaskIfNeeded(justCompleted:)` móc vào `toggleDone` (funnel duy nhất của mọi đường hoàn thành: UI toggle, `confirmVoiceDone`, `sweepComplete`), chỉ trả spotlight khi task vừa xong CHÍNH LÀ cái đã chen ngang. Test: `SharedTests/ParkAndResumeTests.swift` (8 ca, no-store). **CỐ Ý KHÔNG LÀM:** (4) đồng hồ focus khi switch — giữ nguyên hành vi cũ (B thừa hưởng thời gian còn lại của A): một phiên là hộp thời gian chứ không phải hộp per-task, đúng ngữ nghĩa Pomodoro; đổi ý thì sửa `switchFocusTask`/`focusTaskNow`; (5) tự động nhảy sang task vừa capture — không tự quyết hộ user; sau thay đổi này còn 3 bước (nói B → save → "Do this now"). **Giới hạn đã biết:** `parkedTaskID` chỉ MỘT mức (ngắt lồng ngắt thì mức đầu rơi lại vào hàng đợi bình thường — đã ghi `ponytail:` comment); ô ghi resumeNote mới chỉ có trong FocusOverlay, ai không dùng focus session thì chưa có chỗ gõ (hero card `TodayView` là chỗ thêm tiếp nếu cần). **VERIFY TRÊN MAC:** build xanh (`@FocusState` + `onChange(of:)` 2 tham số trong `ResumeNoteField`), ô nhập trên nền scrim có đọc/gõ được không, context menu "Do this now" hiện đúng chỗ.
+
+- [ ] **VERIFY TRÊN MAC: cloud parse giờ là MẶC ĐỊNH ở mọi entry point (anh Khôi chốt 2026-09-06) — viết mù trên Windows, chưa compile.** Ba thay đổi: (1) `IntentParsing.swift` đảo ladder **Cloud → FM → title-only** ở cả `parse`, `parseCapture`, `breakdown`, `breakdownWithContext` — trước đó FM đứng trước nên trên Mac có Apple Intelligence thì cloud KHÔNG BAO GIỜ chạy, kéo theo `taskRefs`/`updates` (sửa task bằng giọng) chết câm; (2) `AppState.proceedToCapture` bỏ hẳn cửa hỏi consent một lần — giọng nói giờ hành xử y hệt đường gõ (⌃⌥T/⌘K) vốn chưa bao giờ hỏi; (3) `DefaultCloudParseGate.isOptedIn()` đổi `bool(forKey:)` → `object(forKey:) as? Bool ?? true`, tức **chưa trả lời = đồng ý**; chỉ `false` tường minh mới giữ text ở máy. Thêm luật mới: cloud trả "không có việc nào" (`.tasks`/`.capture` rỗng) thì **KHÔNG** rơi xuống FM nữa mà đi thẳng title-only — cloud đã nhìn câu đó và phán rồi, để tầng yếu hơn bịa ra task là lật ngược một phán quyết thật. Chỉ `.unavailable`/`.quotaExceeded`/opt-out/offline mới rơi xuống FM. Test: `CaptureHotkeyAndTitleEditTests.testPendingCloudConsentGuardBlocksHandleHotkey` bị thay bằng `testFirstCaptureOnAFreshInstallParsesWithoutAskingForCloudConsent` (test cũ mất đối tượng — `pendingCloudConsent` không còn tới được từ đường thật); thêm 2 test gate mặc định trong `CloudFirstDefaultsAndBreakdownTests`. Cần chạy trên Mac: build xanh + lượt capture đầu tiên của máy sạch đi thẳng vào parse.
+
+- [ ] **HỆ QUẢ 1 của cloud-mặc-định: macOS không còn chỗ TẮT cloud parse (2026-09-06).** Picker parse-engine trong Settings đã bỏ từ 2026-08-24, nên sau thay đổi này surface duy nhất ghi được opt-out trên macOS là toggle bước 3 onboarding — ai đã qua onboarding rồi thì không tắt lại được (bản iOS vẫn còn toggle trong `SettingsIOSView`). Cờ vẫn được tôn trọng ở mọi đường, chỉ là không có chỗ bấm. Muốn trả lại: thêm đúng một `Picker` vào `SettingsView` (chỗ đã ghi comment sẵn).
+
+- [ ] **HỆ QUẢ 2 của cloud-mặc-định: privacy copy + chi phí (2026-09-06).** (a) Text của user giờ lên server mà KHÔNG hỏi lần nào → phải rà lại copy onboarding bước 3, App Store Privacy Nutrition Label, và `contracts/parse-proxy.md` cho khớp thực tế. (b) Mọi capture giờ đều gọi cloud (trước đây máy có Apple Intelligence thì gần như không gọi) → quota free 12 lượt/ngày sẽ chạm trần nhanh hơn hẳn và hoá đơn Gemini tăng; gắn với mục "hiện đếm còn N lượt AI hôm nay" và mục route free tier sang `gemini-2.5-flash-lite` ở dưới.
+
 - [ ] **Đổi `SYSTEM_PREAMBLE_TASK_REFS` sang luật hybrid (anh Khôi chốt 2026-08-21, CHƯA DUYỆT LÀM).** Ranh giới: câu tự-đứng-được-như-một-việc → trả `tasks` đầy đủ + `taskRefs` GỢI Ý (không `updates`), để user chọn tạo-mới/gộp; câu chỉ-sửa thuộc tính (không mô tả việc gì mới) → `tasks=[]` + `updates` như hiện tại. Kéo theo UI client mới: hiện danh sách task liên quan từ `TaskSearchIndex` + user chọn tạo-mới / gộp-vào-X + preview diff + confirm + reindex. Việc lớn, chưa được duyệt làm.
+
+- [ ] **Verify trên Mac: popover confirm đã thu nhỏ (2026-09-05).** `PopoverView.swift`: bỏ khối waveform 42pt + padding (rỗng ở state `.parsed`/`.saving`) và dòng transcript lặp lại tiêu đề draft đầu khi card confirm đang hiện; `width` 380 -> 340, `parsedCardMaxHeight` 420 -> 300. Windows dev không build Swift được -> cần anh Khôi xem mắt trên Mac (batch 1 task, 3 task, 10 task, state `.done`/`.error`) và cho biết còn muốn nhỏ nữa không. Bản iOS `CaptureSheet.swift` chưa đụng.
 
 - [ ] **Card confirm nhánh SỬA task cũ chưa sửa tay được giá trị (anh Khôi chốt luật 2026-08-21: trước khi sửa bất cứ gì đều phải confirm + sửa tay được).** `PopoverView.confirmUpdateCard` (~dòng 939) hiện chỉ có: chọn task đích, diff `old → new`, accept/dismiss từng field, Accept/Reject — deadline model nghe sai 9h thành 11h thì user chỉ BỎ được cả field chứ không chỉnh giá trị. Card task MỚI thì đã đủ (TextField title, `DeadlineControl`/`StartTimeControl`, notes, priority). Cách rẻ: kéo mấy control đó sang card update, đừng viết control mới. Áp cho cả bản Windows khi port.
 
@@ -162,46 +174,12 @@
 > đánh dấu chỉ-đọc, không xoá. Tắt toggle cũng vậy. Xoá thật chỉ qua `volar_sync_purge()` do user tự
 > bấm. Mô hình ghi anh xác nhận: **write-through, đẩy cloud hỏng thì TUYỆT ĐỐI không rollback local**.
 
-- [x] **UI công tắc sync — 4 màn** — ĐÃ LÀM 2026-08-10 (`SyncEnableSheet.swift` + tab Account của
-  `SettingsView.swift`/`SettingsIOSView.swift`). Màn xác nhận nói thẳng cả ba điều bắt buộc; danh
-  sách máy đọc từ `syncState.devices`; nút purge có xác nhận riêng và nói rõ local không bị đụng.
-  Chưa nhìn bằng mắt lần nào — cần Mac. Mô tả gốc: (a) **màn xác
-  nhận lần bật đầu tiên**, bắt buộc nói thẳng rằng toggle áp cho cả tài khoản và mọi máy khác cũng
-  sẽ đẩy dữ liệu lên — anh Khôi đã biết mặt trái này nên UI **không được giấu**; (b) Settings hiển
-  thị trạng thái + "đã bật từ ... bởi máy ..."; (c) **danh sách thiết bị đã sync** (đọc từ
-  `volar_sync_state()`); (d) nút **"Xoá dữ liệu đã đồng bộ khỏi server"** gọi `volar_sync_purge()`,
-  có xác nhận riêng. Ước lượng ~220 dòng.
 - [ ] **⚠️ Màn xác nhận lần bật ĐẦU TIÊN không liệt kê được máy nào — giới hạn CỐ Ý, không phải sót**
   (2026-08-09). Muốn liệt kê thì phải có bảng đăng ký thiết bị mà mọi máy ping vào lúc khởi động =
   **báo về server sự tồn tại của từng máy TRƯỚC KHI user đồng ý**, đúng cái màn xác nhận sinh ra để
   bảo vệ. Nên `sync_devices` chỉ được ghi từ trong `sync_exchange`. Lần bật đầu nói **luật**, không
   bịa danh sách. Nếu anh Khôi muốn có danh sách thật ngay từ lần đầu thì đó là một đánh đổi riêng
   cần anh quyết.
-- [x] **Ba trạng thái từ chối phải phân biệt được** — ĐÃ LÀM 2026-08-10. `SyncFailure` (5 case) ép
-  bằng kiểu; `AppState.syncFailureMessage` trả `nil` cho `.offline` **và** cho `.proRequired`/
-  `.disabled` (hai cái sau hiện qua `SyncState.settingsStatusLine` như TRẠNG THÁI, không phải lỗi);
-  `SyncEngine` gọi `volar_sync_state()` sau mọi 403. Mô tả gốc (2026-08-09):
-  `sync_pro_required` (403) → gợi ý nâng cấp · `sync_disabled` (403) → gợi ý bật, **KHÔNG phải lỗi**
-  · mất mạng → **im lặng**, không hiện gì. Gộp cả ba là cách chắc chắn nhất để user tắt toggle ở máy
-  khác rồi ngồi debug wifi. `SyncEngine` phải gọi `volar_sync_state()` sau **mọi** 403.
-
-- [x] **🔴 SYNC LÀM MẤT CỜ `isSensitive` — ĐÃ VÁ 2026-08-10** (anh Khôi duyệt làm nốt ngay sau khi
-  review phát hiện). Cách vá: đưa cờ **thẳng vào payload sync**, KHÔNG kéo lên `TaskItem` (seam
-  "chỉ sống trên model đã persist" là cố ý và `ReminderScheduler` đang dựa vào nó). `PendingTask`/
-  `RemoteTask` chở cờ **song song với `item`**; `applyRemote` ghi nó trong `withoutStamping`; thêm
-  mutator `TaskStore.setSensitive(_:on:)` — trước đó **không có đường nào set `true`**, nên "đổi cờ
-  làm hàng bẩn" mới chỉ là lý thuyết. Decode thiếu key ⇒ **`true`** (thà im lặng nhầm còn hơn đọc
-  to nhầm). Bất đối xứng ba chiều cố ý, bảng lý do ở `design.md` §3.1 — **đừng "sửa cho nhất
-  quán"**. 11 test mới trong `SharedTests/SyncSensitiveTests.swift`. Mô tả gốc:
-  `VolarTask.isSensitive` (nghĩa: "đừng đọc to tiêu đề task này") **không nằm trong `TaskItem`** —
-  đó là seam cố ý có từ Phase 4, `TaskItem.swift` không mang field này. Nhưng `SyncPayload` dựng từ
-  `TaskItem`, nên **cờ đó không đi qua sync**. Hệ quả cụ thể: task đánh dấu nhạy cảm trên Mac, sync
-  sang iPhone thành **không nhạy cảm**, và `VoiceReminderChannel.speakReminder` sẽ **đọc to tiêu đề
-  thật** thay vì "You have a reminder". Đây là loại lỗi chỉ lộ ra trước mặt người khác.
-  Chưa sửa trong đợt này vì sửa đúng phải chạm ba tầng cùng lúc (`TaskItem` + `VolarTask.apply` +
-  `TaskPayload`), tức đụng file của cả nhóm A lẫn nhóm B giữa lúc bốn agent chạy song song — churn
-  vào một commit vốn đã chưa compile lần nào. **Phải sửa trước khi bật sync cho người dùng thật**,
-  và sửa cùng lúc với việc thêm `isSensitive` vào `TaskItem` (việc đáng làm độc lập).
 - [ ] **BẢN .NET (nhánh `window`) PHẢI GỬI `isSensitive` TRONG PAYLOAD SYNC** (2026-08-10, hệ quả
   trực tiếp của bản vá ngay trên). Wire decode mặc định thiếu key ⇒ `true`, nên **chừng nào client
   Windows chưa gửi trường này thì MỌI task tạo trên Windows sẽ thành "nhạy cảm" trên máy Apple** —
@@ -244,63 +222,11 @@
   tay thì mọi ranh giới đều đúng (phần thập phân bị trim zero, mốc giây, không có phần thập phân),
   và hướng lệch của bản thân cái guard là an toàn (đoán sai kiểu "candidate cũ hơn" chỉ dẫn tới kéo
   lại, vô hại). Nhưng nếu timezone của project đổi thì so sánh này sai câm. Kiểm khi có dữ liệu thật.
-- [x] **Tách 2 API (full-fetch lúc mở app + polling theo `lastFetched`) — ĐÃ TRẢ LỜI XONG
-  2026-08-10: KHÔNG cần API thứ hai, và cái lỗ thật sự đã được vá.** Câu trả lời cho phần "hai API"
-  vẫn là không: full-fetch vốn chỉ là `p_cursor_tasks: null` trên **cùng một API**. Còn ca delta
-  KHÔNG đủ — máy offline lâu hơn thời gian giữ tombstone (server 90 ngày) không biết task nào đã bị
-  xoá nên **hồi sinh chúng và lan ra mọi máy** — anh Khôi duyệt đóng lại, và đã làm bằng **hai van**
-  (design §6.1, client-contract §8.1): **van 1** tự đặt cursor về `null` khi nó cũ hơn 60 ngày
-  (`SyncMerge.cursorMaxAgeDays = 60` < `serverTombstoneRetentionDays = 90`, có test ghim bất biến);
-  **van 2** nút "Re-sync from scratch" ở Settings (cả macOS lẫn iOS) cũng chỉ đặt cursor về `null`.
-  Cả hai **không xoá dữ liệu local** — chỉ là một lượt sync bình thường với cursor `nil`, LWW phân
-  xử như thường. ⚠️ Swift UNVERIFIED (chưa build Mac).
-- [x] **★ ANH KHÔI DUYỆT `specs/008-sync/design.md`** — đã duyệt, implement xong 2026-08-10. Sáu câu
-  đã gật: (1) Supabase thay CloudKit, lệch với `product-vision-v2.md`
-  Tier-3 mục 10 nói "CloudKit sync"; (2) chấp nhận nội dung task (kể cả `sourceTranscript` nguyên
-  văn) nằm ở trạng thái nghỉ trên server Volar; (3) hết Pro thì dừng CẢ hai chiều (không cho pull
-  đọc lại) — dữ liệu server giữ vô thời hạn, dữ liệu local không đụng; (4) LWW mức bản ghi là đủ,
-  không làm merge theo field; (5) `sync_rejects` giữ bản thua nhưng **chưa có UI** đợt này;
-  (6) chi thêm ~250 dòng cho pair-code watch, hay chấp nhận gõ mã 6 ký tự trên iPhone.
 - [ ] **🔴 ĐIỀU KIỆN TIÊN QUYẾT CỦA SYNC — phải chốt TRƯỚC khi bật sync, không phải sau**
   (2026-08-09, phát hiện lại khi thiết kế 008): mục "UTC/calendar" ngay dưới đây và mục "conformance
   test vector" nữa. Trước sync, hai thứ đó vô hình; sau sync chúng thành **hai máy chỉ hai việc khác
   nhau trên cùng một dữ liệu** — triệu chứng giống hệt lỗi sync nhưng nguyên nhân không nằm ở sync,
   nên sẽ đốt rất nhiều giờ debug nhầm chỗ. Chi tiết: `specs/008-sync/design.md` §11.
-- [x] **Riêng tư: `docs/app-store-privacy.md` đã suy lại TỪ ĐẦU cho sync — xong 2026-08-10.**
-  Hai mục đang khai SAI với Apple đã sửa: **(1) Identifiers › Device ID** lật từ "Collected: No"
-  sang **Yes** (`volar.sync.deviceId` — UUID sinh một lần, sống vô thời hạn, lưu vào
-  `sync_devices` gắn `profile_id`, chỉ mất khi user bấm "Delete data on server" hoặc xoá tài
-  khoản); **(2) User Content** tách thành **hai đường** — cloud-parse (gửi đi rồi thôi) và **sync
-  (nằm lại trên server VÔ THỜI HẠN**, gồm `title`/`details`/`notes`/`resumeNote`/
-  `delegation.label` và **`sourceTranscript` nguyên văn**), gắn danh tính bằng khoá ngoại nên
-  **không còn là judgment call**, và chỉ xảy ra khi **Pro VÀ user tự bật công tắc**. Kèm: mục
-  Calendar đã **suy lại từ đầu** (kết luận vẫn "Data Not Collected" nhưng trên lập luận mới —
-  không có gì từ EventKit vào `TaskPayload`, `eventMap`/`volarCalendarID` là `UserDefaults` và
-  design §3 cố ý không sync; ghi rõ 3 điều kiện lật ngược), §2 thêm 8 dòng trigger cho sync, §3
-  thêm phần giả định của 008. **Còn phải quyết trước khi nộp:** hai mục 🔴 ngay dưới đây.
-- [x] **🔴 LỖI THẬT: client GỬI nội dung task lên server KHI CỔNG ĐANG ĐÓNG — ĐÃ SỬA 2026-08-10.**
-  `SyncEngine` gắn vô điều kiện và poll, **không kiểm Pro/công tắc trước khi gọi `sync_exchange`**
-  ⇒ user free đã đăng nhập, hoặc user Pro cố ý tắt công tắc, vẫn đẩy toàn bộ task pending (kể cả
-  `sourceTranscript` nguyên văn) lên server; server abort nên không lưu, **nhưng dữ liệu đã rời
-  khỏi máy** — đi ngược mục đích màn xác nhận §8.1. Sửa: `SyncMerge.gate(state:)` (hàm thuần, 3
-  nhánh) chặn **trước khi gom outbox và dựng request**, cache ở `SyncAccountClient.cachedState`,
-  `handleForeground()` refresh state (đủ 3 thời điểm design §8.2 quy định). Ba luật giữ nguyên:
-  `volar_sync_state()` **không gate**, `.unknown` thì **không gửi và cũng không kết luận** (không
-  đặt `lastFailure`), server vẫn là quyền cuối. Chi tiết: `client-contract.md` §8.0.
-  ⚠️ Swift UNVERIFIED. Lợi ích phụ: user free tốn **0 request** mỗi 30 giây thay vì một request
-  mang cả outbox.
-- [x] **🔴 `p_device_label` chở TÊN NGƯỜI DÙNG — ĐÃ SỬA 2026-08-10, KHÔNG cần khai `Name`.**
-  Đánh giá ban đầu nói cả hai nền tảng đều dính là **sai** — cảm ơn phần phản biện. **iOS chưa bao
-  giờ dính**: từ iOS 16 `UIDevice.current.name` tự suy giảm về tên model nếu app không xin
-  entitlement `com.apple.developer.device-information.user-assigned-device-name`; đã verify trong
-  repo — **không có** entitlement đó ở đâu cả, target iOS 17.0 ⇒ chuỗi thật là `"iPhone · iOS"`.
-  **macOS mới là chỗ rò**: `Host.current().localizedName` không bị hạn chế tương đương và trả tên
-  máy do user đặt, mà macOS mặc định đặt theo tên chủ tài khoản.
-  Sửa: macOS → hằng `"Mac"`; iOS → `.model` thay vì `.name` (để bảo đảm bằng **cấu trúc**, không
-  phụ thuộc việc sau này có ai thêm entitlement kia không); thêm hậu tố 4 ký tự đầu `deviceId` cho
-  hai máy cùng model khỏi trùng nhãn — không lộ thêm gì vì server đã nhận đủ UUID đó qua `p_device`.
-  ⇒ `Contact Info › Name: **No**` và giờ mới **thật sự đúng theo cấu trúc**. ⚠️ Swift UNVERIFIED —
-  cần nhìn chuỗi nhãn thật trên Mac + iPhone.
 - [ ] **Epoch guard của van 2 KHÔNG có test bảo vệ** (2026-08-10). `cursorEpoch` trong
   `SyncEngine.runOneExchange` là logic sửa **race condition** — bấm "Re-sync from scratch" đúng lúc
   một lượt đang bay thì lượt cũ sẽ ghi đè cursor và nút thành **no-op im lặng**. Hiện **không có
@@ -363,7 +289,6 @@
 - [ ] **ĐỀ XUẤT CHƯA DUYỆT: bộ conformance test vector cho `nextTask` + `ReminderRecord.derive`** (2026-08-09, em đề xuất, anh Khôi chưa chốt). Vấn đề: hai hàm này được **port tay** sang từng platform (Windows đã viết lại bằng C#, iOS sẽ có bản riêng); lệch một tầng so sánh hoặc một con số trong 8 hằng số của `derive` thì không compiler nào kêu, không test riêng của bản nào fail — chỉ user thấy hai máy chỉ hai việc khác nhau. Spec L1 chặn bằng chữ, nhưng chữ không chạy được. Đề xuất: ~40–60 case JSON (input snapshot + `now` cố định + output kỳ vọng) đặt ở nhánh `main`, mọi bản phải chạy qua và pass. Đây là cách duy nhất bắt drift **tự động** mà không cần chia sẻ code giữa Swift và .NET.
 - [ ] **Ambient background bị nuốt trong Focus mode** (2026-08-09, phát hiện khi viết `docs/app-feature-spec.md`). `AmbientBackground` (mưa/tuyết/than hồng) chỉ được gắn ở `TodayView.swift:46`, KHÔNG gắn trong `FocusOverlay` — mà overlay lại phủ `.ultraThinMaterial` + `VolarColor.bg.opacity(0.78)` lên trên. Nghĩa là đúng lúc user cần khung cảnh tập trung nhất thì nền động gần như biến mất. Cần nhìn tận mắt trên Mac trước khi quyết: (a) chấp nhận (focus cố tình trần trụi), hay (b) đưa `AmbientBackground` vào trong `FocusOverlay` dưới lớp kính. Liên quan trực tiếp tới cách mô tả "focus mode có nền mưa rơi" ra ngoài — chưa quyết thì đừng viết vào marketing.
 - [ ] **Ba toggle Settings ▸ Notifications vẫn là `@State` trang trí** (2026-08-09): "Show reminders", "Sound", "Focus mode aware" (`SettingsView.swift:575-583`) không nối vào logic nào — chính file tự ghi chú điều đó ở dòng 584-585. Riêng "Focus mode aware" ("stay silent while macOS Focus is on") là thứ user sẽ tin là có thật. Trước khi submit App Store: hoặc nối thật vào `ReminderContextGate`, hoặc gỡ khỏi UI. Bật một toggle mà không có gì xảy ra là dạng lỗi niềm tin, không phải lỗi nhỏ.
-- [x] **Câu chữ về ngôn ngữ — ✅ ANH KHÔI CHỐT 2026-08-09: nói "hỗ trợ đa ngôn ngữ", KHÔNG nêu con số.** Bỏ hẳn "72 ngôn ngữ" (con số này không có nguồn nào trong repo). Cơ sở kỹ thuật: engine mặc định là **Groq Whisper** (`AppState.swift:1329`) → đa ngôn ngữ, tự nhận ngôn ngữ; nhưng chỉ chạy khi **đã đăng nhập** (`GroqEngine.isConfigured`), chưa đăng nhập thì rơi về Apple on-device (`AppState.swift:2277`) với phạm vi = `SFSpeechRecognizer.supportedLocales()` của máy đó. Cloud speech mở cho **cả free lẫn Pro**, chỉ khác hạn mức ngày (`supabase/functions/groq/index.ts:158-160`) — comment "Pro-only"/`403 upgrade_required` trong `GroqEngine.swift:36-38` là di sản cũ, không còn đúng với server. Chi tiết ở `docs/spec.md` §1.3.
 - [ ] **Tính năng "link desktop ↔ điện thoại" trong mô tả sản phẩm hiện KHÔNG tồn tại** (2026-08-09). Grep `iphone|ios|handoff|continuity|sync|companion|phone` toàn `Volar/Sources`: không có gì. Nhánh `ios` chưa có sync (để dành tier trả phí). Đây là feature mới cần spec riêng (sync backend + app iOS + giao thức trạng thái focus), không phải chỉnh sửa nhỏ — quyết định làm hay bỏ khỏi mô tả sản phẩm. Chi tiết đối chiếu ở `docs/app-feature-spec.md` §3.3.
 
 > **★★ KINH TẾ ĐƠN VỊ: PLAN CHI PHÍ ĐANG SAI 8,5× Ở INPUT TOKEN (đo 2026-08-09, đã sửa doc, CHƯA DEPLOY quota mới).**
@@ -385,7 +310,6 @@
 
 - [ ] **Baseline `probe-task-refs.ts` thực đo (2026-08-09): 8–11/14, KHÔNG ổn định ở 10.** Ca fail NHẤT QUÁN: `[06]`, `[12]`, `[14]` — cả ba đã phân loại là **giới hạn model** (flaky `offsetMinutes`/`offsetKind`, và "dời X sang <time>" lẫn lộn startTime/deadline), không phải lỗi prompt: đã thử patch prompt cho `[06]` đo N=8 ra 0/8, TỆ HƠN baseline 2/8 → không adopt. `[04]` đã pass ổn định sau khi sửa bug `addConditions`. Ca `[05]`,`[10]`,`[13]` flaky. **Đừng đuổi theo điểm số probe này bằng cách sửa prompt — đã thử, hại nhiều hơn lợi.**
 
-- [x] ~~**Trade-off cần anh Khôi quyết**~~ — **ANH KHÔI CHỐT 2026-08-09: CHẤP NHẬN, không chữa thêm.** Không nâng model (đắt ~9,3×), không tách 2 lượt gọi (x2 chi phí + x2 độ trễ mọi request, ngược mục tiêu "2 giây từ ý nghĩ đến task"). Ca hỏng là ca hẹp và hỏng theo kiểu LÀNH: mất dependency chứ không mất task, không mất cue — user vẫn thấy đủ việc, chỉ thiếu một liên kết mà một chạm là nối lại được. Giữ nguyên hồ sơ dưới đây phòng khi model rẻ hơn/khá hơn thì mở lại. — **combo cue+dependency khi hai task trùng nhiều từ vựng (2026-08-09).** Task mới vừa có cue VỪA phụ thuộc task cũ, mà tên hai task trùng từ vựng nhiều → model làm rơi dependency (~28% pass). Đã sửa được 2 bug thật trong prompt (mâu thuẫn shape giữa 2 section; model tự suy rộng luật "cue loại trừ deadline" thành "cue loại trừ conditions"), nhưng phần còn lại là giới hạn model nhỏ phải làm 3 việc cùng lúc. Thử thêm worked example minh hoạ đúng ca này → **phá ca khác** (8/8 → 1/4) nên KHÔNG đưa vào code. Lựa chọn: (a) chấp nhận, (b) nâng model cho riêng đường envelope+cue, (c) tách 2 lượt gọi.
 > - **⚠️ Đồng thời phát hiện ca probe cũ bị NHIỄM ĐỀ:** `"Sugashack"` + `"landing page"` nằm NGUYÊN VĂN trong worked example của `SYSTEM_PREAMBLE_CORE` (gửi trong MỌI request), mà probe lại dùng đúng hai từ đó làm case ⇒ đang chấm bài có sẵn đáp án trong đề. Đã đổi case sang "Fumiko/hợp đồng thuê nhà". **Comment cũ trong `probe-cues.ts` kết luận ca này "unrelated to cues" là SAI** — đã verify: bỏ cue đi thì ca gốc pass 10/10. Đã sửa lại comment.
 
 > **★ ĐÃ CHẠY PROBE THẬT LẦN ĐẦU (2026-08-07) — nợ "chưa từng thử prompt với model thật" treo từ 2026-07-29 ĐÃ TRẢ.** Key Gemini để ở `supabase/.env` (đã gitignore). Lệnh: `deno run --env-file=supabase/.env --allow-net --allow-env supabase/scripts/probe-time-parsing.ts`. Toàn bộ đợt đo (~10 lần chạy probe) tốn khoảng **$0.30** — đo thoải mái, đừng ngại.
@@ -492,23 +416,6 @@
   - **Phần cloud có lẽ ĐÃ lên production rồi** (prompt sửa ở `gemini.ts` từ 29/07, mà hai đợt deploy 02/08 đều ship `parse/index.ts` + 7 file `_shared/` — `gemini.ts` nằm trong đó) — nhưng **CHƯA CÓ GÌ CHỨNG MINH**, vì repo **không có probe cho breakdown** (chỉ có `probe-time-parsing.ts` và `probe-task-refs.ts`). Việc kèm theo: **viết `probe-breakdown.ts`** — ca kiểm: bước 1 phải mở đầu bằng động từ hành động vật lý, không được là sub-goal trừu tượng, và phải đúng ngôn ngữ của title (ít nhất 1 ca tiếng Việt + 1 ca tiếng Anh).
   - Tầng on-device (`FoundationModelParser.swift:150`) đã sửa nhưng **chưa build lần nào** — vẫn chờ Mac như mọi thứ khác.
 
-- [x] ~~**★ CALENDAR ĐỌC-VÀO (Calendar → Volar)**~~ — **ANH KHÔI BÁC 2026-08-07 ("thôi không sync calendar vào Volar nữa"). KHÔNG LÀM.** Chiều ghi ra sẵn có (`CalendarSync`, Volar → Calendar, opt-in mặc định tắt) GIỮ NGUYÊN, không đụng. Khảo sát bên dưới giữ lại làm hồ sơ nếu sau này mở lại.
-  - **⚠️ HỆ QUẢ DÂY CHUYỀN phải nhớ (đừng để rơi):** (1) mục #5 full-screen escalation **vẫn phải dùng proxy micro** để đoán "đang họp" — tín hiệu yếu, đã biết, chấp nhận; (2) trục **startability** ở mục (a) luận điểm lõi **mất một trong ba đầu vào** (quỹ thời gian thật) — còn lại 2 đầu vào: trạng thái/energy hỏi 1 từ, và bước 1 có phải hành động vật lý <2' hay không. (a) vẫn làm được nhưng yếu hơn thiết kế ban đầu; (3) `busyIntervals` ở `AppState.computeConflicts:5568` và `ReminderContextGate:15` **tiếp tục là `[]` vô thời hạn** — nên sửa comment "until the P3 calendar integration lands" thành "cố ý bỏ ngỏ, xem backlog 2026-08-07" để người sau khỏi tưởng là việc còn dang dở; (4) vision `docs/product-vision-v2.md` Tier 1 mục 1 (Calendar awareness) coi như **rút khỏi Tier 1** — nên sửa vision cho khớp, đừng để doc nói một đằng backlog một nẻo.
-  - *(hồ sơ khảo sát 2026-08-07, giữ lại phòng khi mở lại)*
-  - **Phát hiện: hiện đang có ĐÚNG CHIỀU NGƯỢC LẠI.** `CalendarSync.swift` là one-way **Volar → Calendar** (ghi task của Volar vào một calendar "Volar" tự tạo, opt-in, mặc định TẮT). Header file + `docs/app-store-privacy.md:180` ghi rõ: *"Reading events FROM the calendar to create or modify tasks is explicitly out of scope and not implemented"*. `CalendarAccess.swift` chỉ đọc đúng một số nguyên: `store.calendars(for: .event).count`.
-  - **✅ TIN TỐT 1 — KHÔNG cần xin thêm quyền.** `CalendarAccess.requestAccess()` đã gọi `requestFullAccessToEvents()` (trên macOS 14 đây là API DUY NHẤT cấp quyền đọc — không có `requestReadOnlyAccessToEvents`). Entitlement `com.apple.security.personal-information.calendars` + `NSCalendarsFullAccessUsageDescription` đã có sẵn trong `Volar.entitlements`/`Info.plist`. Nghĩa là **quyền đọc event đã nằm trong tay, chỉ là code chưa dùng** — không thêm TCC prompt nào.
-  - **✅ TIN TỐT 2 — ENGINE ĐÃ CÓ SẴN LỖ CẮM, chỉ chưa ai cắm dây.** `VolarCore.conflicts(forAdding:into:now:calendar:busyIntervals:frogId:)` **đã nhận `busyIntervals: [DateInterval]`** và đã dùng nó để tính `.deadlineCapacity`. Có đúng 2 call site đang truyền `[]`:
-    - `AppState.computeConflicts` (`AppState.swift:5568`) — comment ghi *"busyIntervals: [] until the P3 calendar integration lands"*.
-    - `ReminderContextGate.busyIntervals` (`ReminderContextGate.swift:15`) — và `shouldSuppressVoice(now:)` **đã check nó ở dòng đầu tiên**.
-    ⇒ Chỉ cần đổ event thật vào 2 chỗ này là **hai tính năng đã viết sẵn tự sáng đèn**, không phải viết mới.
-  - **★ ĐIỂM NGON NHẤT (sửa luôn một quyết định cũ):** mục #5 full-screen escalation đã chốt "im khi micro đang được app khác dùng (proxy 'đang họp') — macOS không có API công khai đọc Focus/DND". **Calendar là tín hiệu "đang họp" THẬT, tốt hơn hẳn proxy micro**, và `ReminderContextGate` vốn đã viết để nhận nó. Nên gộp vào cùng đợt.
-  - **Cơ chế auto-sync:** `EKEventStoreChanged` notification (bắt được cả họp đột xuất do người khác thêm sau khi máy sync). Lưu ý: notification này **thô** — không nói cái gì đổi, nên phải query lại cả cửa sổ ngày. App phải đang chạy mới nhận được ⇒ query lại lúc launch/foreground là bắt buộc, không được chỉ dựa vào notification.
-  - **⚠️ LUẬT LỌC EVENT — sai là tính năng thành có hại:** bỏ `availability == .free`; bỏ `participantStatus == .declined`; bỏ `status == .canceled`; **BỎ ALL-DAY EVENT** (một event cả ngày kiểu "Sprint week"/sinh nhật sẽ xoá sạch quỹ thời gian cả ngày → app báo "anh không còn thời gian nào" trong khi user rảnh cả ngày). Tentative: đề xuất tính là bận cho capacity nhưng KHÔNG chặn nhắc.
-  - **⚠️ KHÔNG ĐƯỢC BIẾN THÀNH MOTION.** Vision đã định vị chống lại "auto-schedule nặng calendar". Calendar **không xếp task vào ô lịch**; nó chỉ nuôi 2 thứ: (a) quỹ thời gian thật → trục *startability* của engine ("anh có 25' trước cuộc họp" → chìa việc 20', không chìa việc 2h); (b) **deadline hiệu dụng** ("hạn 5pm nhưng 2–5pm họp → hạn thật 2pm").
-  - **⚠️ KHÔNG XẾP LẠI IM LẶNG.** Board tự đảo chỗ = user mất niềm tin ("đồ của tôi đâu?"), đúng cái bẫy "giấu mà không bảo chứng" đã ghi ở mục luận điểm lõi. Đề xuất: **một dòng duy nhất, điềm tĩnh, một chạm** — "Vừa có cuộc họp 2–3h chèn vào. Việc X (ước 1h) không còn kịp trước hạn — dời sang tối nay?" Kèm góc chống-shame: quy trách nhiệm cho **cuộc họp ăn mất 2 tiếng**, không phải cho user.
-  - **⚠️ RÒ RỈ CLOUD — cấm tuyệt đối.** Request parse hiện ĐÃ gửi `open_task_titles` lên Gemini. Nếu nhét context calendar vào prompt theo cùng đường đó thì **tiêu đề cuộc họp của user bay lên bên thứ ba**. Luật: dữ liệu calendar KHÔNG BAO GIỜ rời máy; cùng lắm chỉ được phép đi một con số dẫn xuất (số phút rảnh), và tốt nhất là không gì cả.
-  - **Việc kèm theo:** cập nhật `docs/app-store-privacy.md` §Calendar (hiện đang khẳng định chỉ đọc *count*, không đọc nội dung event — sẽ thành sai). Phân loại "Data Not Collected" của Apple vẫn giữ được vì dữ liệu không rời máy, nhưng **phần văn xuôi mô tả đang sai thì phải sửa cùng đợt code**, không để lệch.
-
 - [ ] **★ CUE / NEO THEO SỰ KIỆN — `task_cues_v1` (anh Khôi nêu ca "ngủ dậy thì test feature này" 2026-08-07). ✅ ANH KHÔI DUYỆT 2026-08-08 → Opus đã chốt design: `specs/006-cues-and-waiting/design.md` + instruction cho Sonnet ở `tasks.md` cùng thư mục. T1–T5 ĐÃ CODE (T1–T4 qua Opus review; T5 wire-UI vừa xong 2026-08-09, viết mù trên Windows, CHƯA BUILD MAC).** Đây là mảnh còn thiếu để làm được mục (d) implementation intentions ở trên.
   - **T5 wire-UI (2026-08-09) — 3 việc phát sinh ngoài phạm vi, cần Opus/anh Khôi cân nhắc, KHÔNG tự sửa:**
     1. **Chỗ hiện cue/waiting-mode ambient là judgment call, không phải chốt trong design.md.** Design chỉ nói "popover/menu bar/next-up" chung chung. Đã chọn: banner trong `TodayView` (khu NOW/NEXT, đúng tinh thần "next-up") + trigger `.onAppear` của `TodayView` làm "điểm chạm tự nhiên" thay cho `PopoverView` (popup capture, thấy không hợp vì đang mid-capture task khác) hoặc `MenuBarExtra` dropdown (nằm ở `VolarApp.swift`, ngoài phạm vi file được giao). Có thể cần dời sang menu bar dropdown thật sự sau khi build Mac thấy rõ UX.
@@ -609,12 +516,6 @@
   - **[x] ĐÃ SỬA — `ensureDerived` không bao giờ bù mẻ nudge mới.** Guard cũ `recordsForTask(taskId).isEmpty` nghĩa là sau khi 8 nudge đầu bắn hết, task luôn có record (`delivered`) nên không bao giờ được derive lại → "lặp mãi mỗi 3 ngày" thực tế im lặng sau vài ngày. Agent tự phát hiện và BÁO thay vì vá bừa ngoài scope. Sửa: task `deadline == nil` cũng derive lại khi **không còn record `scheduled` nào có `fireAt > now`**; task CÓ deadline giữ nguyên guard cũ. **Bất đối xứng này là CỐ Ý** — mốc từ `policy.offsets` (VD mốc "đúng hạn", offset 0) nằm trong quá khứ với task quá hạn, derive lại sẽ tái tạo và bắn lại thông báo user đã nhận rồi; nhánh không-deadline không có rủi ro đó vì chỉ sinh mốc `> now`. **Đừng "sửa" cho đối xứng.** Đã xác nhận `clearScheduled` chỉ xoá record `scheduled`, giữ nguyên lịch sử `delivered`/`satisfied`, nên không bắn trùng.
   - **CẦN VERIFY TRÊN MAC:** tạo task không hạn priority thường → nhắc lần đầu sau 7h chứ không phải 1h; task không hạn priority cao → nhắc sau 1h; để app chạy qua vài ngày xem có còn nhắc tiếp không (đây là chỗ dễ hỏng nhất); có nhiều task treo mà vẫn nhận đúng nhắc deadline.
 
-- [x] **`schema.ts` chuyển sang FAIL-OPEN toàn bộ + bộ test Deno đầu tiên cho server — anh Khôi chốt 2026-07-28, CHƯA DEPLOY.** Trước đây MỘT field optional hỏng → `validateParsedTask` trả `undefined` → `validateParsedTaskArray` rớt **CẢ MẢNG** → 502 → client chỉ được task trống tiêu đề. Nghĩa là model trả 3 task đúng mà task #2 có `priority: 7` thì user **mất sạch cả 3**.
-  - Giờ: mọi field optional hỏng thì bỏ RIÊNG field đó (`notes`, `deadline`, `startTime`, `estimateMinutes`, `priority`, `recurrence`, `reminderOverride`, `conditions`, `kind`, `subtasks`, `followUpReview`). Mảng `conditions`/`subtasks`: phần tử hỏng bỏ riêng phần tử. **`title` vẫn fail-closed** (field bắt buộc duy nhất). Task không có title bị bỏ riêng, KHÔNG rớt cả mảng; chỉ khi TẤT CẢ task hỏng mới trả `undefined` → 502. `droppedCount` giờ gộp cả "vượt MAX_TASKS" lẫn "bỏ vì hỏng" (chỉ dùng để log quan sát, không lái control flow — đã kiểm `parse/index.ts`).
-  - **Test: `supabase/tests/schema_test.ts`, 15 ca, `deno test supabase/tests/schema_test.ts` → 15/15 xanh** (Opus chạy lại độc lập để xác nhận, không chỉ tin report của agent).
-  - **Đặt NGOÀI `functions/` là có chủ ý:** `supabase functions deploy` ship theo từng function; CLI đời mới tree-shake file không được import, nhưng không có gì đảm bảo cho mọi phiên bản/flag về sau. Để ngoài thì hết rủi ro mà không mất gì.
-  - Không thay đổi API/chữ ký nào → `parse/index.ts` không cần sửa.
-
 - [ ] **★★★ NHẮC NHỞ THEO TỈ LỆ THỜI GIAN + `remindPeriod` — chốt 2026-07-28, viết trên Windows, CHƯA BUILD MAC, CHƯA DEPLOY.** Anh Khôi: *"lấy trung vị thời gian hiện tại → deadline để popup lời nhắc. Còn 1 nửa → nhắc. Còn 1/3 → nhắc"*, và *"nếu user chỉ định bao lâu nhắc 1 lần thì dùng cái đó, không thì dùng cái của mình"*.
   - **Anh Khôi chốt (hỏi trực tiếp):** THAY THẾ mốc cố định chứ không cộng thêm. Mặc định cũ `offsets: [-86400, -3600, 0]` → mặc định mới `offsets: [0]` + `fractionsRemaining: [0.5, 1/3]`. Chặn biên: **khoảng cách tối thiểu 10 phút** giữa 2 lần nhắc, **không nhắc sớm hơn 1 ngày** trước hạn.
   - **`ReminderPolicy` thêm 2 field:** `fractionsRemaining: [Double] = []` và `remindPeriod: TimeInterval? = nil`. Ưu tiên: `remindPeriod` (user nói rõ) **thắng** `fractionsRemaining` (mặc định của mình). `offsets` luôn được áp chồng lên — đó là cách mốc "đúng hạn" tiếp tục tồn tại.
@@ -666,15 +567,6 @@
     - **⚠️ RỦI RO CAO NHẤT CẦN THỬ TRÊN MAC:** `PopoverView` vốn đã được host trong một `NSPopover`; lồng thêm `.popover` SwiftUI bên trong là vùng hay dở chứng trên macOS (anchor/dismiss). Nếu hỏng, phương án thay thế là hàng inline bung ra tại chỗ thay vì `.popover`. Kèm: `DatePicker` style `.automatic` chưa pin case name; mật độ card giờ có thêm 2 affordance nhỏ ("Add time" + "Add note") khi trống — cần nhìn mắt.
   - **Đề xuất CHƯA được duyệt (2026-07-28):** "nói bằng giọng để sửa task đã có" (VD "dời cái báo cáo sang chiều mai" → update task cũ thay vì tạo task trùng). Em có đề xuất, anh Khôi chọn chỉ làm sửa-tay-trên-card trước. Cần: intent `update` mới, match task đích, confirm card kiểu diễn biến trước/sau.
 
-- [x] **Structured 3-point logging + `reqId` correlation cho `groq`/`parse`/`subscription` — xong 2026-07-28, viết trên Windows, CHƯA DEPLOY.** Thêm log tại (1) function được gọi, (2) mỗi lời gọi service ngoài (request+response), (3) function kết thúc, cho cả 3 edge function, cộng thêm siết catch-block/reason theo yêu cầu bổ sung giữa chừng. Chi tiết:
-  - `supabase/functions/_shared/log.ts`: thêm `newRequestId`, `logRequestStart`, `logUpstreamRequest`, `logUpstreamResponse`, `logRequestEnd`, `verboseBodiesEnabled`, `truncateForLog`, `errorDetails`. `logEvent`/`logError` giữ nguyên chữ ký, chỉ đổi thứ tự field nội bộ (`reqId` luôn ngay sau `event`).
-  - `_shared/gemini.ts`, `_shared/auth.ts`, `_shared/appstore.ts`: `callGemini`/`verifyAccount`/`createServiceRoleClient`/`verifyAppStoreJWS` nhận thêm `reqId?: string` (optional để không vỡ chữ ký), mọi log call site trong 4 file này đã thread `reqId` — kể cả các nhánh trước đây là `catch {}` trần không log gì (auth.ts's token-check exception, appstore.ts's JWS verify-failure).
-  - `groq/index.ts`, `parse/index.ts`, `subscription/index.ts`: mỗi request có 1 `reqId` sinh ở `Deno.serve` (trước mọi check), `logRequestStart` gọi ngay đầu; mọi return đi qua closure `finish()`/`makeFinisher()` đảm bảo `logRequestEnd` luôn chạy (kể cả 404 unknown-route, OPTIONS, và catch-all) kèm field `reason` phân biệt từng nhánh; Groq/Gemini/Supabase calls bọc `logUpstreamRequest`/`logUpstreamResponse`.
-  - **⚠️ CỜ `LOG_VERBOSE_BODIES` PHẢI ĐỂ TẮT TRÊN PRODUCTION.** Bật lên (`="1"`) cho phép log transcript/task-title/notes (route `/parse`, cắt 500 ký tự) — mâu thuẫn với App Store privacy label nếu bật ở prod. Route `/groq` KHÔNG BAO GIỜ log audio bytes dù verbose (chỉ log field name/filename/content-type/size). Route `/subscription` (`/link`, `/redeem`) KHÔNG BAO GIỜ log giá trị JWS/promo code dù verbose (chỉ log tên field + độ dài) — đây là ngoại lệ có chủ ý so với `/parse`, vì JWS/code là secret, khác transcript.
-  - **Ngoại lệ có chủ ý (đã bàn với coordinator):** lỗi từ Groq/Gemini (status non-2xx) log kèm body lỗi đã cắt 500 ký tự KỂ CẢ KHI CHƯA BẬT VERBOSE — đây là thông điệp chẩn đoán của upstream, không phải nội dung user. Riêng nhánh 200 (transcript/model output thật) thì không bao giờ log body.
-  - **CHƯA DEPLOY** — máy này không có Supabase CLI. Anh Khôi cần chạy `supabase functions deploy groq parse subscription` (nhánh `macos`) sau khi review, rồi set `LOG_VERBOSE_BODIES` KHÔNG có trên project production (chỉ bật tạm thời khi debug rồi tắt lại ngay).
-  - `_shared/appstore.ts`'s `base64ToBytes`/`hasPinnedAlg` (2 catch nội bộ, dòng ~24/~58) và `_shared/http.ts`'s `reader.cancel().catch(() => {})` (drain cleanup) CỐ Ý chưa thêm log — không có `reqId` tới tận đó một cách tự nhiên và giá trị chẩn đoán thấp (silent-drop 1 cert PEM block giữa nhiều block hợp lệ, hoặc JWT header decode thất bại → đã tính là `auth_invalid`/`appstore_config_invalid` ở tầng gọi). Nếu sau này cần chẩn đoán sâu hơn cho việc parse PEM certs, nên thread `reqId` xuống `splitPemCertificates` và log riêng từng block hỏng.
-
 - [ ] **★★ CONFIRM-LIST UI (lượt 2/2) — chốt 2026-07-28, viết trên Windows, CHƯA BUILD MAC.** Dựng UI cho tầng dữ liệu đã xong ở lượt 1 (mục ngay dưới đây): checkbox `isIncluded`, hàng "Might already exist" (dò trùng), picker `.taskDone` hai nhóm (task trong cùng batch / task đã có). Chỉ sửa `Volar/Sources/Views/PopoverView.swift` + `Volar/Sources/App/AppState.swift` (3 mutator mới: `setDraftIncluded`, `setDuplicateResolution`, `resolveTaskDoneToDraft`) — không đụng `TaskStore.swift`/`IntentParsing.swift`/`NLParser.swift`/`TextCapturePanel.swift`/`VolarCore/`/`Tests/`.
   - **Đổi:** bỏ affordance remove-destructive cũ (`showRemove`/`AppState.removeDraft`, xoá hẳn — không còn ai gọi) thay bằng checkbox `inclusionCheckbox` ở mọi draft (kể cả batch 1 task); bỏ tick → cả card mờ `.opacity(0.45)` nhưng vẫn tap được (không dùng `.disabled`). Nút Save đổi sang đếm draft đang tick (`includedDraftCount`), "Nothing selected" + disabled khi 0. `duplicateHintRow` mới hiện dưới mỗi draft có `duplicateCandidates` — pill "Add new" (mặc định) + 1 pill/candidate (tra tiêu đề qua `openTasks`, id không tra ra thì bỏ qua lặng lẽ), chọn "use existing" hiện câu giải thích hậu quả (merge, không tạo task mới). Picker `.taskDone` (`dependencyPicker`) giờ có `Menu` 2 `Section`: "Task in this capture" (draft khác CÙNG batch, loại chính nó + loại draft đang bỏ tick) TRƯỚC, "Existing tasks" (`openTasks`, y nguyên) SAU. Draft bị trỏ tới mà sau đó bị bỏ tick ⇒ `intraBatchTaskDoneRow` hiện cảnh báo "Won't be created: …" thay vì chip bình thường — KHÔNG tự xoá condition.
   - **⚠️ Rủi ro tự đánh giá, CẦN VERIFY TRÊN MAC:**
@@ -691,8 +583,6 @@
   - **`bestFuzzyMatch`/`duplicateCandidates` vẫn Jaccard token đặt cạnh nhau qua `scoredMatches` dùng chung** — comment `// UNVERIFIED` cũ vẫn còn nguyên: cách diễn đạt khác từ (VD "dọn thẻ html" vs "sanitize html tag") sẽ KHÔNG match. Nếu dò trùng chất lượng không đạt sau khi có UI thật, cần thuật toán tốt hơn Jaccard token thô.
   - **⚠️ 1 TEST SẼ GÃY, KHÔNG SỬA ĐƯỢC (ràng buộc file không cho đụng `Tests/`):** `Volar/Tests/TextCaptureTests.swift::testApplyParseResultReportsEveryTitleForACompoundUtterance` giả định gõ 2 task cùng lúc vẫn lưu thẳng — nay Việc 4 (dưới) cố tình đổi hành vi này, test cần viết lại ở lượt build Mac tới (mong đợi mới: 2-task phải mở confirm-card, KHÔNG lưu thẳng, `state.textCapture == .closed` chứ không phải `.saved(...)`).
   - **Việc 4 (text-capture đi qua confirm khi phức tạp):** `applyTextCaptureParseResult` giờ chỉ lưu thẳng khi ĐÚNG 1 draft + 0 duplicate hint + 0 condition; ngược lại set `confirmDrafts`/`captureState = .parsed`/`textCapture = .closed` — tái dùng NGUYÊN plumbing mutual-exclusion đã có sẵn ở `VolarApp.swift` (`observeCaptureState`/`observeTextCaptureState`/`syncCapturePanel`/`syncTextCapturePanel`), không cần sửa view nào.
-  - [x] **LƯỢT 2b XONG (2026-07-28) — xem mục ★★ CONFIRM-LIST UI (lượt 2/2) ngay đầu file.** Checkbox/duplicate-hint/picker hai nhóm đã dựng trong `PopoverView.swift`, CHƯA BUILD MAC (chi tiết verify ở mục đó, không lặp lại ở đây).
-
 - [ ] **★★★ NGẮT `HeuristicNLParser` khỏi router + breakdown floor — chốt 2026-07-28, viết trên Windows, CHƯA BUILD MAC.** Anh Khôi chốt: cloud không dùng được thì capture ra task CHỈ CÓ TIÊU ĐỀ (transcript nguyên văn), không parse bằng heuristic nữa. Sửa đúng 2 file code + backlog này:
   - `Volar/Sources/Parsing/IntentParsing.swift`: `IntentRouter.parse` bỏ tầng đáy `heuristic.parse(...)`, ladder giờ FM → Cloud → title-only (`ParsedTask` chỉ có `title` = transcript trim, mọi field khác `nil`). Xoá stored property `heuristic` + tham số `heuristic:` khỏi `init`. `IntentRouter.breakdown` cũng bỏ `heuristic.breakdown(...)`, trả `[]` khi FM+Cloud đều fail. `Route` enum: bỏ case `.heuristic`, thêm `.titleOnly` (task title-only thật) và `.empty` (transcript rỗng, không route nào chạy — khác `.titleOnly` vì không có gì để làm tiêu đề).
   - `Volar/Sources/App/AppState.swift`: `fetchBreakdown` bỏ lời gọi `HeuristicNLParser().breakdown(...)`, truyền `heuristicFloor: []` cho `applyBreakdownFetchResult` (giữ nguyên signature vì `CloudFirstDefaultsAndBreakdownTests.swift` gọi trực tiếp với giá trị thật để test riêng nhánh so khớp — không đụng file test). Cơ chế báo lỗi cho user ĐÃ CÓ SẴN, tái dùng luôn: `BreakdownFetchState.failed` ("Couldn't reach the breakdown service…") khi steps rỗng, `.unavailable` ("Turn on cloud parsing…") khi chưa opt-in/chưa đăng nhập — `TaskBreakdownView.swift` đã đọc cả hai, KHÔNG cần thêm UI mới.
@@ -811,9 +701,6 @@ Quyết định anh Khôi chốt 2026-07-27: scope **core-first**, **chưa sync*
 cho paid tier), tổ chức code = **tách lớp shared, chỉ làm trên nhánh ios, merge về `macos` sau khi
 bản Mac build xanh**.
 
-- [x] **iOS Phase 0 — dựng `Shared/` XONG 2026-07-27.** 40 file **COPY** (không move) từ
-  `Volar/Sources` sang `Shared/`; `#if` platform đã chèn ở 5 file; `VolarCore` mở `.iOS(.v17)`.
-  Verify: `Volar/` không bị đụng, `#if`/`#endif` cân bằng, đường macOS byte-identical. CHƯA build.
 - [ ] **🔴 LUẬT ĐANG HIỆU LỰC: `Volar/Sources` và `Shared/` là HAI BẢN SAO, cố ý.** anh Khôi chốt
   2026-07-27: copy chứ không move, vì có 2 agent khác đang làm trên nhánh `ios` → move sẽ race.
   macOS + Windows chạy `Volar/Sources` (cũ), iOS chạy `Shared/` (mới). **`Volar/project.yml` KHÔNG
@@ -855,12 +742,6 @@ bản Mac build xanh**.
   đổi state. Ghi lại để lần QA trên máy thật soi xem có hao pin/giật không. (2026-07-27)
 
 - [ ] **iOS Phase 3 (Opus review + `docs/ios-verify-checklist.md`)** — xem `specs/004-ios-port/plan.md` §6.
-- [x] **~~R2 (iOS reminder chết vì Timer)~~ — ĐÃ KIỂM 2026-07-27, KHÔNG PHẢI VẤN ĐỀ.**
-  `ReminderScheduler` không dùng `Timer` để bắn reminder; mọi thứ là `UNNotificationRequest` +
-  `UNTimeIntervalNotificationTrigger` (dòng ~545) hoặc `trigger: nil` cho loại tức thì ⇒ hệ thống
-  bắn, chạy được cả khi app bị đóng trên iOS. Đã thêm observer
-  `UIApplication.didBecomeActiveNotification` → `rebuildFromStorage()` làm đường phục hồi
-  (tương đương wake trên Mac).
 - [ ] **⚠️ `systemRequestCap = 60` — giới hạn scale, có ở CẢ bản Mac (`ReminderScheduler.swift:41`).**
   Chỉ 60 record `.scheduled` gần nhất được đăng ký với OS; nạp thêm chỉ xảy ra khi có mutation /
   launch / wake (iOS: thêm foreground). User có >60 reminder đang chờ mà không mở app lại thì
@@ -891,11 +772,6 @@ bản Mac build xanh**.
   xanh trên máy thật. ⚠️ Cần **app group** + dời SwiftData container vào group container — **phải
   làm TRƯỚC khi có người dùng thật**, để sau là migration đau. Đây là thứ thay thế menu bar
   (constitution V glance-and-dismiss) nên không được quên. (2026-07-27)
-- [x] ~~**Sync Mac ↔ iPhone cho paid tier** — anh Khôi chốt "để sau, sẽ dùng cho paid tier". Ràng buộc
-  đã biết: SwiftData+CloudKit yêu cầu mọi property optional/có default và cấm `@Attribute(.unique)`,
-  **không sửa được sau khi đã có dữ liệu user**.~~ (2026-07-27) → **THAY BẰNG `specs/008-sync/design.md`
-  (2026-08-09).** Ràng buộc CloudKit ở trên **không còn áp dụng**: design chọn Supabase. Việc còn lại
-  không phải "quyết có sync hay không" nữa mà là "anh Khôi duyệt design" — xem khối ★ SYNC đầu file.
 - [ ] **Thiếu `PrivacyInfo.xcprivacy` — CẢ BẢN MAC LẪN iOS**: App Store từ chối upload nếu thiếu
   privacy manifest khi app dùng required-reason API (`UserDefaults` = `CA92.1`, file timestamp).
   Bản iOS tạo ở Phase 1/A1; **bản `macos` cũng phải thêm** — chưa có trong
@@ -1164,8 +1040,6 @@ bản Mac build xanh**.
 
 - [ ] **★★★ SUPABASE DEPLOY 2026-07-26 (project `volar` đã sống lại + `groq` proxy đã viết):**
   - [ ] **ANH KHÔI SET 2 SECRET** (Dashboard → Project Settings → Edge Functions → Secrets; em không set, không cần thấy key): `GEMINI_API_KEY` → function `parse`; `GROQ_API_KEY` → function `groq`. Chưa set thì cả 2 trả 503 opaque, app tự fallback on-device (đúng thiết kế, không crash).
-  - [x] **✅ ĐÃ SỬA + ĐÃ VERIFY TRÊN PRODUCTION (2026-07-29).** Smoke test sau lần deploy 2026-07-29: `POST {}` không auth giờ trả `401 auth_missing` chứ không còn `400 invalid_request` — thứ tự đã thành auth-trước-validate, caller chưa auth không dò được validation rule nữa. `readBodyCapped` vẫn nằm trước auth (đúng thiết kế — nhánh free `verifyFreeAuth` cần `rawBody` để bind App Attest clientDataHash). Nội dung lỗi cũ giữ lại bên dưới để đối chiếu lịch sử:
-  - [x] ~~**⚠️ `parse` VALIDATE BODY TRƯỚC KHI AUTH (Opus phát hiện qua smoke test 2026-07-26):**~~ gọi `POST /functions/v1/parse` với `{}` và **không có auth** → trả `400 invalid_request` kèm `detail: "transcript is required and must be a non-empty string"`. Đọc code: `readBodyCapped` (L71) → `validateRequestBody` (L84-86) → **rồi mới** auth (L91-100). Hệ quả: (a) caller chưa auth dò được schema/validation rule; (b) traffic chưa auth vẫn chạy hết đường parse JSON + validate. Không rò key, và invocation vẫn bị tính tiền dù reorder hay không, nên severity THẤP-TRUNG BÌNH. **Cách sửa (đã xác định, giữ đúng ràng buộc):** phải GIỮ `readBodyCapped` trước auth vì nhánh free `verifyFreeAuth(deviceTokenHeader, rawBody)` cần `rawBody` để bind App Attest clientDataHash; chỉ **chuyển `validateRequestBody` xuống SAU auth**. Function `groq` (viết sau) đã auth-trước-body nên không bị. Sửa xong phải redeploy — chờ có CLI để deploy rẻ. (2026-07-26)
   - [ ] **Tách bucket rate-limit cho `groq`** (agent tìm ra, Opus ghi nhận chưa sửa): `groq` và `parse` dùng CHUNG bảng `parse_rate_limit` + cùng key `SHA-256(bundleId:originalTransactionId)` + cùng biến `PARSE_PAID_RPM` ⇒ subscriber transcribe dồn dập có thể tự làm mình 429 khi parse task, và 2 route không tune độc lập được. Soft abuse bound nên không phải bug đúng/sai. Cách sửa: prefix key riêng (`"groq:" + keyHash`) hoặc bảng/RPC `groq_rate_limit`. Làm trước khi có traffic thật. (2026-07-26)
   - [ ] **Cài Supabase CLI + login để deploy bằng CLI** (rule mới trong CLAUDE.md global 2026-07-26: deploy function thì DÙNG CLI, không dùng MCP `deploy_edge_function` vì MCP bắt nhồi toàn bộ script vào tham số → tốn token + chậm). Hiện máy **chưa có** CLI (`supabase: command not found`) và không có `SUPABASE_ACCESS_TOKEN`; `supabase login` là interactive nên anh Khôi phải tự chạy (`! npx supabase login` hoặc cài qua scoop/npm). Đợt deploy 2026-07-26 vẫn phải đi qua MCP vì thiếu CLI. (2026-07-26)
 
@@ -1395,18 +1269,6 @@ thuộc tính 240pt bên phải. Bỏ hết nhãn in hoa (`PRIORITY`/`DEADLINE`/
 Anh Khôi build trên Mac, hai lỗi ĐẦU TIÊN nằm ở `Shared/Sync/` (plan 008), **không phải** từ
 pass "Đường vào Volar" — lỗi có sẵn, chưa từng lộ vì chưa ai build.
 
-- [x] **`SyncEngine.swift:43` — "main actor-isolated default value in a nonisolated context".**
-  `nonisolated static let shared = SyncEngine()` trên class `@MainActor` ⇒ bắt compiler chạy init
-  MainActor từ ngữ cảnh nonisolated. **Sửa: bỏ `nonisolated`.** Đã grep cả 5 call site
-  (`AppState.swift` 1539/1837/1871/1910 + doc 1823) — TẤT CẢ đã `@MainActor`, không chỗ nào cần
-  quyền truy cập nonisolated mà nó đang cấp. Test không tham chiếu.
-  🔴 **ĐỪNG sửa bằng `nonisolated(unsafe)`** — sẽ tắt cảnh báo mà vẫn để một object `@MainActor`
-  với tới được từ thread bất kỳ, đúng cái nguy hiểm compiler đang chỉ.
-- [x] **`SyncPayload.swift:530/538` — "static property is not concurrency-safe".**
-  `ISO8601DateFormatter` là class, không `Sendable`. **Sửa: `nonisolated(unsafe) private static let`.**
-  Hợp lệ vì cả hai formatter được cấu hình xong trong closure khởi tạo và KHÔNG BAO GIỜ bị sửa lại;
-  chỉ `date(from:)`/`string(from:)` được gọi. Giữ chúng `private` để tính đúng đắn này còn kiểm được
-  bằng cách đọc đúng một file.
 - [ ] **Nợ kỹ thuật: chuyển sang `Date.ISO8601FormatStyle`** (value type, `Sendable` thật). CỐ Ý chưa
   làm: nó parse khác về độ chặt với `Z` vs `+00:00` và dấu phân cách phần thập phân, mà đây là bộ
   giải mã ngày của đường sync. Đổi thì phải có `SyncPayloadTests` xanh trên Mac — máy Windows không
@@ -1489,84 +1351,6 @@ sửa `project.yml`, không cần Xcode. Nhưng vẫn phải build/verify trên 
 
 ---
 
-- [x] **[I0] Spec mục "Đường vào Volar" vào artifact thiết kế** — XONG 2026-08-17. — không code, chỉ design.
-  Gồm I1, I2, I3, I5. I4 (Raycast) tách vì là chuyện phân phối, không phải design.
-  Artifact: https://claude.ai/code/artifact/ff5c0276-267b-4f1e-8e14-41fb283a1d92
-
-- [x] **[I1] App Intents — CODE XONG 2026-08-18, chưa build trên Mac.** Viết MỘT API, mở ra: Shortcuts ·
-  Siri · Spotlight (macOS 14+) · Action Button (iPhone 15+) · Widget · automation theo Focus mode ·
-  Watch. Đây là cách duy nhất "đưa vào workflow" mà không phải build N tích hợp — user tự lắp
-  theo cách mình không đoán trước được.
-  - Ba intent là đủ: `AddTaskIntent`, `WhatAmIDoingIntent`, `StartFocusIntent`.
-  - File mới `Shared/Intents/` (đặt ở `Shared/` để iOS dùng chung — xem `project.yml`: `../Shared`
-    được compile bởi cả macOS lẫn iOS target).
-  - KHÔNG cần target mới. Chỉ thêm file + `AppShortcutsProvider`.
-  - **Phải tái dùng** đúng entry point parse mà `TextCapturePanel` đang gọi, đừng nhân bản logic.
-  - **ĐÃ LÀM:** `Shared/Intents/IntentBridge.swift` (seam) + `Shared/Intents/VolarAppIntents.swift`
-    (3 intent + `VolarShortcuts`) + 1 dòng `AppState.shared = state` trong `VolarApp.swift` init.
-    `project.yml` KHÔNG phải sửa — `- path: ../Shared` là tham chiếu cả cây, xcodegen tự nhặt.
-  - **QUYẾT ĐỊNH nền tảng (anh Khôi duyệt 2026-08-17):** confirm tách theo bề mặt, không theo entry
-    point. Luật phát biểu lại: *"mọi capture phải cho người dùng thấy nó parse ra gì, qua kênh mà
-    người dùng đang có mặt"* — màn hình = confirm card, Siri = câu đọc lại. `app-links.md` KHÔNG
-    bị phá, chỉ cần thêm một câu định nghĩa "confirm" trên bề mặt không màn hình.
-  - **PHÁT HIỆN quan trọng, đừng quên:** cách tách này ĐÃ CÓ SẴN trong code từ 2026-07-28
-    (`applyTextCaptureParseResult`, Việc 4 "chỉ đi qua confirm khi phức tạp"): 1 draft + không trùng
-    + không điều kiện → tự lưu; còn lại → mở confirm card. Nên I1 KHÔNG sửa một dòng logic save nào,
-    chỉ đọc lại kết quả. Ba outcome: `.saved(titles)` / `.needsConfirmation` / `.failed`.
-  - **CÒN LẠI, phải làm trên Mac:** (a) build; (b) kiểm Shortcuts có nhận phrase không — app
-    Shortcuts cache rất dai, thường phải rebuild + khởi động lại Shortcuts mới thấy; (c) kiểm ca
-    Volar CHƯA chạy mà gọi intent → macOS có tự launch nền không, `awaitShared` 3s có đủ không;
-    (d) kiểm `static weak var shared` trong extension có compile không (static stored property
-    trong extension là hợp lệ, nhưng chưa verify với `weak` + `@MainActor`).
-
-- [x] **[I2] XONG CẢ HAI 2026-08-18** (Services menu + Share Extension). Bôi đen chữ ở bất kỳ đâu →
-  chuột phải → "Task mới trong Volar". Không UI mới, không màn hình mới.
-  - Services menu: `NSServices` trong `Info.plist` + `NSApplication.shared.servicesProvider`.
-    Nhẹ, không cần target mới. **Làm phần này trước.**
-  - Share Extension: CẦN target mới trong `project.yml` + Info.plist riêng + app group để chia
-    dữ liệu với app chính. Nặng hơn nhiều. Tách thành bước riêng, đừng gộp.
-  - Rủi ro đã biết: app group cần khai ở `Volar.entitlements` VÀ ở App ID trên developer portal;
-    sai chỗ này thì extension chạy nhưng không thấy dữ liệu.
-  - **ĐÃ LÀM (Services menu):** `Volar/Sources/App/ServicesProvider.swift` (mới) + `NSServices` trong
-    `Info.plist` + `servicesProvider` stored property & `VolarServicesProvider.install()` trong
-    `AppDelegate.applicationDidFinishLaunching`. Đi qua `appLinkHandler?.onCapture` — ĐÚNG đường
-    `app-links.md` đã dành sẵn cho FR-040, nên vẫn qua confirm card (người dùng đang nhìn màn hình).
-  - **Verify trên Mac:** service chỉ hiện sau khi app đã build+chạy một lần cho `pbs` thấy. Không
-    thấy thì `/System/Library/CoreServices/pbs -flush` rồi khởi động lại app chủ.
-  - **ĐÃ LÀM (Share Extension) 2026-08-18** — và nhỏ hơn hẳn dự đoán ở trên: **KHÔNG cần app group.**
-    Extension gọi thẳng `extensionContext.open(volar://capture?...)`, tức đi qua đúng lược đồ URL đã
-    đăng ký sẵn. Ghi chú "cần app group" phía trên giờ SAI, giữ lại để biết vì sao đổi hướng.
-    File: `Volar/ShareExtension/{ShareViewController.swift, Info.plist, VolarShare.entitlements}`
-    + target `VolarShareExtension` trong `project.yml` + dependency `embed: true` từ target `Volar`.
-  - **RỦI RO SỐ MỘT khi build:** extension là bundle ký riêng ⇒ cần App ID `tech.kioh.Volar.Share`
-    trên developer portal trước khi Automatic signing tạo được profile. Đây là thứ nhiều khả năng
-    hỏng đầu tiên.
-  - **RỦI RO SỐ HAI:** chưa xác nhận `NSExtensionContext.open(_:)` có được sandbox cho phép với
-    share extension trên macOS không (`NSWorkspace` thì extension không dùng được). Nếu bị chặn thì
-    mới phải quay về đường app group. **Đừng làm app group trước khi thấy đường đơn giản hỏng thật.**
-
-- [x] **[I3] XONG 2026-08-18.** Thêm `CalendarAccess.nextEvent(within:now:excludingCalendarID:)` (Shared) + hàng sự kiện trong Glance. Ba loại trừ đều load-bearing: **lịch mirror của chính Volar** (không thì Glance đọc lại task của mình như thể là cuộc họp), sự kiện cả ngày, và sự kiện đã bắt đầu. Cửa sổ 45 phút. Dùng token `instrument` (xanh băng = thông tin), KHÔNG dùng mint. Quyền EventKit ĐÃ xin rồi mà chưa dùng cho Glance.
-  Cho Glance nói "còn 12 phút nữa họp", và đừng gợi ý task 45 phút ngay trước cuộc họp.
-  Time-blindness là triệu chứng ADHD số một; đây là món rẻ nhất vì hạ tầng đã có.
-  Phụ thuộc: Glance HUD phải tồn tại trước (xem mục Volar Paper bên dưới).
-
-- [x] **[I5] XONG 2026-08-18 — `docs/url-scheme.md`.** Gần như $0 vì đã chạy sẵn. Một trang docs
-  mở khoá luôn Alfred, Keyboard Maestro, Stream Deck, BetterTouchTool, Hammerspoon — không phải
-  build cái nào. File: `docs/url-scheme.md`. Phải liệt kê đủ tham số của cả `capture` lẫn `ai-done`,
-  đọc từ `AppLinkHandler` chứ đừng bịa.
-
-- [x] **[I6] XONG 2026-08-18 — `MenuBarLabel.idleContent` đọc `dashboardActiveTask`, cắt 120pt, dùng `textSec` KHÔNG dùng mint (luật một nguồn sáng).** Menu bar hiện tên task NOW thay vì chỉ icon. `Views/MenuBarLabel.swift` đã có,
-  chỉ đổi nội dung + cắt chuỗi. Cẩn thận: label menu bar bám appearance của thanh menu, không
-  bám app — trùng rủi ro đã ghi ở pass Volar Paper.
-
-- [x] **[I7] XONG 2026-08-18 — không cần code.** Rơi ra miễn phí từ I1: `StartVolarFocusIntent` đã đủ để Shortcuts Automation "When Focus Work turns on" gọi. Đã viết công thức vào `docs/url-scheme.md` §3. Gần như miễn phí sau khi có I1
-  (làm qua App Intents automation, không phải API riêng). Làm sau cùng.
-
-- [x] **[I4] XONG 2026-08-18 — `integrations/raycast-volar/`, 2 lệnh.** Thiếu đúng `icon.png` (phải export từ `design/logo/mark.svg`), đã ghi checklist trong README của nó. TÁCH RIÊNG, không chặn mục nào. Đây không phải tích hợp, đây là
-  **kênh phân phối**: Raycast là nơi indie dev / ADHD-pro (wedge mạnh nhất theo research thị trường)
-  sống cả ngày. Viết TypeScript, gọi `volar://`, không đụng code Swift ⇒ không chặn việc Mac.
-  Phụ thuộc: I5 (phải có docs URL scheme trước).
-
 - [ ] **[I8] Ảnh → task (OCR) — CHƯA LÀM, CHƯA DUYỆT** (2026-08-26, anh Khôi hỏi trong session).
   Hiện repo 0 hit `Vision`/`VNRecognizeText`/OCR; Share Extension cố ý chỉ nhận
   `NSExtensionActivationSupportsText` + 1 web URL, không nhận `public.image`. Nghĩa là chụp màn hình
@@ -1623,22 +1407,8 @@ KHÔNG supersede luật một nguồn sáng, luật cấm đỏ, ramp ấm = ưu
 - [ ] **Chưa build-verify: option trong Settings thành dòng danh sách** (2026-08-24) — vẫn giữ 7 tab. Chỉ đổi bên trong mỗi tab: `SettingsRow` bỏ nền card + bo góc, thành dòng danh sách có gạch tóc dưới, chạy hết bề ngang (lề 22); VStack của từng tab spacing 0. Tab Account/About vẫn có lề (`Tab.isInset`). Cần nhìn trên Mac: dòng full-bleed có sát mép cửa sổ quá không, và gạch tóc cuối danh sách có thừa không.
 - [ ] **Chưa build-verify: sidebar gọn lại** (2026-08-24) — bỏ `onDeviceFooter`, bỏ `ProSidebarRow` (cả struct lẫn hai sheet Paywall/SignIn kèm nó trong `Sidebar.swift`), `captureButton` + hàng phím ⌃⌥M chuyển xuống đáy sau `Spacer`. Bỏ hàng "Task parsing" và "Cloud parsing status" khỏi Settings. Cần nhìn trên Mac: (1) tour chặng 1 (`.tourAnchor(.capture)`) giờ trỏ xuống đáy cột, xem lỗ khoét còn đúng chỗ không; (2) không còn đường nào vào Paywall từ sidebar — chỉ còn tab Account trong Settings, xem có đủ không; (3) ai đã từ chối cloud parse thì nay không bật lại được từ Settings (consent gate và `setParseEngine` vẫn còn, chỉ mất chỗ chọn) — nếu cần thì thêm lại một đường bật.
 - [ ] **Task board (kanban theo mốc thời gian) — mới có design, chưa có code** (2026-08-24) — anh Khôi đặt 2026-08-24. Design nằm ở artifact Volar Screens, mục 2. Cột theo hạn: Overdue / Today / Tomorrow / This week / Later, KHÔNG có cột trạng thái; kéo thẻ = dời hạn. Để dựng thật cần: thêm case `.board` vào `AppState.selectedSection` (+ mọi chỗ switch trên enum đó), một view kanban mới, và chốt xem kéo-thả có ghi `deadline` thật không (nếu có thì kéo vào "This week"/"Later" phải quy ra ngày cụ thể nào).
-- [x] **Sidebar: nhãn nhóm `Focus` -> `Tasks`** (2026-08-24) — ba hàng dưới nó là Now/Archived/Completed, không liên quan phiên focus.
 - [ ] **Đặt Cloudflare AI Gateway trước Gemini + Groq** (2026-08-29) — đề xuất chưa duyệt. Chỉ đổi
   base URL trong `_shared/gemini.ts` và `functions/groq/index.ts`, không đổi logic. Được: log +
   chi phí từng call, rate limit, fallback khi provider lỗi — đúng thứ thiếu hồi vụ đốt 55.000đ
   ngày 7→9/8. Miễn phí, KHÔNG cần credit hay apply chương trình gì. Rủi ro: thêm một hop mạng vào
   đường đi của `/parse` và `/groq` (latency + một điểm chết mới) — phải đo trước khi bật cho prod.
-- [x] ~~**Cân nhắc thay Groq Whisper bằng Workers AI Whisper cho `/groq`**~~ (2026-08-29) — ĐÓNG
-  cùng ngày sau khi tra giá: Workers AI Whisper là $0.0005/phút audio, tức 10.000 phút ≈ $5. Bill
-  STT nhỏ đến mức migrate không tiết kiệm gì đáng kể, và cũng không tiêu nổi credit. Ngoài ra
-  `@cf/openai/whisper-large-v3-turbo` chính là model Groq đang chạy nên cũng không có lợi ích chất
-  lượng nào. Tiền thật của Volar nằm ở Gemini `/parse`, không phải STT. Nội dung cũ giữ lại dưới
-  đây để biết vì sao từng cân nhắc:
-  ~~(2026-08-29) — đề xuất
-  chưa duyệt, chỉ khả thi nếu được duyệt credit Cloudflare for Startups (Workers AI có cap riêng
-  theo tier, CHƯA biết cap tier 3 là bao nhiêu — phải hỏi Cloudflare). Đây là cách DUY NHẤT biến
-  credit thành tiền tiết kiệm thật cho Volar, vì credit không trả hộ Gemini/Groq/Supabase.
-  Chưa làm vì: app là voice-first, Groq nhanh bất thường và latency STT chính là UX — phải A/B đo
-  cả latency lẫn độ chính xác tiếng Việt trước, không đổi mù.
-

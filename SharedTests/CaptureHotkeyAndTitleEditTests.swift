@@ -165,18 +165,22 @@ final class CaptureHotkeyAndTitleEditTests: XCTestCase {
         XCTAssertEqual(state.voiceDoneNoMatchTranscript, "mark the report done")
     }
 
-    func testPendingCloudConsentGuardBlocksHandleHotkey() {
+    /// Replaces `testPendingCloudConsentGuardBlocksHandleHotkey` (anh Khôi chốt 2026-09-06: cloud
+    /// parsing is the default on every entry point, so `proceedToCapture` no longer pauses to ask
+    /// and `pendingCloudConsent` is unreachable from this path). The `handleHotkey` guard that test
+    /// exercised is untouched and still load-bearing for `pendingServerConsent`/`voiceDoneConfirm`;
+    /// what is asserted here is the NEW contract — a fresh install's very first utterance goes
+    /// straight to parsing instead of stopping on a privacy question.
+    func testFirstCaptureOnAFreshInstallParsesWithoutAskingForCloudConsent() {
         let state = AppState()
-        // Fresh install: `cloudParseConsent` defaults to nil (never asked) — see setUp's
-        // `cloudParseConsentKey` cleanup. Driving `pendingCloudConsent = true` through the real,
-        // synchronous `finishRecording` path since the property itself is `private(set)` (see the
-        // file header for why this file can't just assign it).
+        // Fresh install: `cloudParseConsent` reads nil (never answered) — see setUp's
+        // `cloudParseConsentKey` cleanup.
+        XCTAssertNil(state.cloudParseConsent)
+
         state.finishRecording(transcript: "buy milk tomorrow")
-        XCTAssertTrue(state.pendingCloudConsent, "test setup assumption: a fresh install's first finishRecording must reach the one-time cloud-parse consent gate")
 
-        state.handleHotkey()
-
-        XCTAssertTrue(state.pendingCloudConsent, "a pending cloud-parse consent prompt must never be silently answered by a hotkey press")
+        XCTAssertFalse(state.pendingCloudConsent, "cloud parsing is the default now — the first capture must never stop to ask")
+        XCTAssertEqual(state.captureState, .parsing, "the utterance must go straight into `runParse` instead of `.error`-as-consent-prompt")
     }
 
     // MARK: - ConfirmDraft.effectiveTitle
