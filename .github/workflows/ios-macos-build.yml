@@ -1,0 +1,60 @@
+# `.xcodeproj` isn't committed (xcodegen generates it), so every run must `xcodegen generate`
+# first. Signing is off because this runner has none of team ZXWAPGR9XP's certs/profiles — this
+# is a compile check, not a build for distribution. VolarTests/VolarIOSTests are still
+# UNVERIFIED (project.yml), so this workflow only builds, it does not run tests yet.
+name: Build iOS & macOS
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        working-directory: Volar
+        run: xcodegen generate
+      - name: Build
+        working-directory: Volar
+        run: |
+          xcodebuild build \
+            -project Volar.xcodeproj \
+            -scheme Volar \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM=""
+
+  ios:
+    name: iOS app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        working-directory: VolarIOS
+        run: xcodegen generate
+      - name: Build
+        working-directory: VolarIOS
+        run: |
+          xcodebuild build \
+            -project VolarIOS.xcodeproj \
+            -scheme VolarIOS \
+            -configuration Release \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
