@@ -87,12 +87,23 @@ jobs:
             2>&1 | tee test-ios.log | grep -E "error:|Test Case .* (failed|passed)|Executed|TEST (SUCCEEDED|FAILED)" || true
           grep -q "TEST SUCCEEDED" test-ios.log
 
+      - name: Collect crash reports
+        if: always()
+        run: |
+          mkdir -p crashes
+          cp ~/Library/Logs/DiagnosticReports/*.ips crashes/ 2>/dev/null || true
+          cp ~/Library/Logs/DiagnosticReports/*.crash crashes/ 2>/dev/null || true
+          ls -la crashes || true
+          for f in crashes/*.ips; do [ -f "$f" ] && { echo "== $f"; grep -m1 -E '"procName"|"exception"' "$f"; grep -m3 -E 'Fatal error|precondition|assertion|termination' "$f"; }; done || true
+
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: xcodebuild-logs
-          path: "*.log"
+          path: |
+            *.log
+            crashes/
           if-no-files-found: ignore
 
       - name: Summary
