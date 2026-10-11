@@ -37,6 +37,9 @@ extension UNUserNotificationCenter {
 
     /// `add(_:)`'s async form sends the non-Sendable request across isolation; the completion-
     /// handler form is a plain synchronous ObjC call from the caller's actor, so nothing crosses.
+    /// `@MainActor` (CI round 4): every caller is main-actor-isolated, and a nonisolated async
+    /// helper would itself be a crossing for `self` and `request`.
+    @MainActor
     func volarAdd(_ request: UNNotificationRequest) async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             add(request) { _ in continuation.resume() }
