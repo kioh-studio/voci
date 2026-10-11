@@ -179,7 +179,7 @@ struct CaptureSheet: View {
                     BlinkingCaret(color: IOSPalette.mint)
                 }
             }
-            .frame(minHeight: 44, maxWidth: .infinity, alignment: .center)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
             .padding(.horizontal, IOSLayout.screenPadH)
             .padding(.top, 20)
 
@@ -652,7 +652,6 @@ struct CaptureSheet: View {
         switch confirm.action {
         case .complete: verb = "Mark done"
         case .clearExternal: verb = "Clear"
-        case .delegate: verb = "Hand off to Claude"
         }
         if confirm.candidates.count == 1 {
             return "\(verb): \u{201C}\(confirm.candidates[0].title)\u{201D}?"
@@ -660,14 +659,12 @@ struct CaptureSheet: View {
         switch confirm.action {
         case .complete: return "Which task is done?"
         case .clearExternal: return "Which one cleared?"
-        case .delegate: return "Which task did you hand off?"
         }
     }
 
     private func voiceDoneOneTapLabel(_ action: VoiceDoneAction, title: String) -> String {
         switch action {
         case .complete, .clearExternal: return "Yes — \(title)"
-        case .delegate: return "Yes — hand off"
         }
     }
 

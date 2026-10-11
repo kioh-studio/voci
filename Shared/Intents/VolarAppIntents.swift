@@ -102,9 +102,10 @@ struct WhatAmIDoingIntent: AppIntent {
         }
 
         guard let task = app.activeTask else {
-            return .result(dialog: app.openTasks.isEmpty
+            let empty = app.openTasks.isEmpty
+            return .result(dialog: IntentDialog(stringLiteral: empty
                 ? "Nothing left today."
-                : "Nothing running. Say \"start focus\" to begin the next one.")
+                : "Nothing running. Say \"start focus\" to begin the next one."))
         }
 
         var line = task.title

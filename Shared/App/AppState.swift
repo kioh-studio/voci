@@ -3991,14 +3991,16 @@ final class AppState {
         for match in index.matches(for: title, limit: openTasks.count) {
             best[match.id] = max(best[match.id] ?? 0, match.score)
         }
-        return best
-            .map { FuzzyMatch(id: $0.key, score: $0.value) }
-            .filter { $0.score >= duplicateHintBar }
-            // `Dictionary` không có thứ tự, nên phải phá hoà bằng id — nếu không, cùng một dữ liệu
-            // có thể cho ra hai danh sách gợi ý khác nhau giữa hai lần chạy.
-            .sorted { $0.score == $1.score ? $0.id.uuidString < $1.id.uuidString : $0.score > $1.score }
-            .prefix(duplicateHintLimit)
-            .map { $0 }
+        // Split into typed steps (CI 2026-10-11: the one-chain form made the type-checker time out).
+        var matches: [FuzzyMatch] = best.map { FuzzyMatch(id: $0.key, score: $0.value) }
+        matches = matches.filter { $0.score >= duplicateHintBar }
+        // `Dictionary` không có thứ tự, nên phải phá hoà bằng id — nếu không, cùng một dữ liệu
+        // có thể cho ra hai danh sách gợi ý khác nhau giữa hai lần chạy.
+        matches.sort { lhs, rhs in
+            if lhs.score == rhs.score { return lhs.id.uuidString < rhs.id.uuidString }
+            return lhs.score > rhs.score
+        }
+        return Array(matches.prefix(duplicateHintLimit))
     }
 
     /// O(n) trên `openTasks` cho mỗi condition — nhiều nhất ~10 condition một lượt confirm, nên

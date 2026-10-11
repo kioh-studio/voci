@@ -82,14 +82,16 @@ struct TaskSearchIndex {
             for id in ids { hits[id, default: 0] += weight }
         }
 
-        return hits
-            .map { (id: $0.key, score: min(1, $0.value / maxWeight)) }
-            .filter { $0.score > 0 }
-            // `Dictionary` không có thứ tự — phá hoà bằng id, nếu không cùng một dữ liệu có thể cho
-            // ra hai thứ tự khác nhau giữa hai lần chạy.
-            .sorted { $0.score == $1.score ? $0.id.uuidString < $1.id.uuidString : $0.score > $1.score }
-            .prefix(limit)
-            .map { $0 }
+        // Typed steps (CI 2026-10-11: the one-chain tuple form made the type-checker time out).
+        var scored: [(id: UUID, score: Double)] = hits.map { (id: $0.key, score: min(1, $0.value / maxWeight)) }
+        scored = scored.filter { $0.score > 0 }
+        // `Dictionary` không có thứ tự — phá hoà bằng id, nếu không cùng một dữ liệu có thể cho
+        // ra hai thứ tự khác nhau giữa hai lần chạy.
+        scored.sort { lhs, rhs in
+            if lhs.score == rhs.score { return lhs.id.uuidString < rhs.id.uuidString }
+            return lhs.score > rhs.score
+        }
+        return Array(scored.prefix(limit))
     }
 
     /// Term khớp trong chỉ mục: ưu tiên khớp đúng, không có thì tìm term gần nhất theo trigram.
