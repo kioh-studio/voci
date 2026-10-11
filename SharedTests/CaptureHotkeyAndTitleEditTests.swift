@@ -203,16 +203,13 @@ final class CaptureHotkeyAndTitleEditTests: XCTestCase {
     /// a space here — the list must never render a title with a hole in it.
     func testEffectiveTitleFlattensNewlinesIntoSpaces() {
         var draft = ConfirmDraft(task: makeParsedTask(title: "Buy milk"))
-        draft.editedTitle = "Buy oat milk
-for the office"
+        draft.editedTitle = "Buy oat milk\nfor the office"
         XCTAssertEqual(draft.effectiveTitle, "Buy oat milk for the office")
     }
 
     func testEffectiveTitleFallsBackWhenTheEditIsOnlyWhitespaceAndNewlines() {
         var draft = ConfirmDraft(task: makeParsedTask(title: "Buy milk"))
-        draft.editedTitle = " 
-  
- "
+        draft.editedTitle = " \n  \n "
         XCTAssertEqual(draft.effectiveTitle, "Buy milk")
     }
 

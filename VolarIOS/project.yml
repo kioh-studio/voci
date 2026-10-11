@@ -114,6 +114,10 @@ targets:
       base:
         SWIFT_VERSION: "6.0"
         SWIFT_STRICT_CONCURRENCY: complete
+        # The app target's PRODUCT_NAME is `Volar` (not `VolarIOS`), so xcodegen's default
+        # TEST_HOST (`VolarIOS.app/VolarIOS`) points at nothing — first CI test run, 2026-10-11.
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Volar.app/Volar
+        BUNDLE_LOADER: $(TEST_HOST)
     dependencies:
       - target: VolarIOS
       - package: VolarCore
