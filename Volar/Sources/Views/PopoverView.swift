@@ -2292,6 +2292,9 @@ private struct StartTimeControl: View {
 /// than duplicating the `HStack`/`Capsule` three more times. `DeadlineControl.body` itself is left
 /// with its own inline copy, unchanged — it predates this helper and touching working, already-
 /// shipped deadline code for a pure style refactor is out of scope for this task.
+// `@MainActor`: a free function building SwiftUI views; `VolarIcon.init` and `.plain` are main-actor
+// isolated under Swift 6 / Xcode 16.4 (first CI build 2026-10-11).
+@MainActor
 private func addPill(label: String, icon: VolarIconName, action: @escaping () -> Void) -> some View {
     Button(action: action) {
         HStack(spacing: 4) {

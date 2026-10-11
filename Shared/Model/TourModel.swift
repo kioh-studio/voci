@@ -1,4 +1,5 @@
-// Sources/Views/Tour/TourModel.swift — pure data model for the first-run guided coach-mark tour
+// Shared/Model/TourModel.swift (moved from Volar/Sources/Views/Tour 2026-10-11: `AppState` in
+// Shared/ references `TourStop`, so the iOS target needs it too) — pure data model for the first-run guided coach-mark tour
 // (`TourOverlay.swift`). Deliberately free of SwiftUI/AppKit imports so `TourStop.all` and its
 // content can be exercised by `Tests/TourFlowTests.swift` with zero UI/store/EventKit dependencies
 // — the same "pure model, tested without the view" split this codebase already uses for
