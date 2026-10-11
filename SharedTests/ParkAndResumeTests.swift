@@ -215,10 +215,14 @@ final class ParkAndResumeTests: XCTestCase {
         let c = makeTask("Water the plants")
         let (state, _) = try makeStoreState([a, b, c])
         state.focusTaskNow(c.id)
+        // `focusTaskNow` itself parks whatever the engine had spotlit before (by design — see
+        // `testFocusTaskNowPinsTheTargetAndParksWhatWasSpotlit`), so the slot is not necessarily nil
+        // here; what must hold is that the dependency edit leaves it untouched.
+        let parkedBefore = state.parkedTaskID
 
         XCTAssertNil(state.addTaskDependency(a.id, dependsOn: b.id))
 
-        XCTAssertNil(state.parkedTaskID, "adding a dependency to some background task must not hijack the spotlight slot")
+        XCTAssertEqual(state.parkedTaskID, parkedBefore, "adding a dependency to some background task must not hijack the spotlight slot")
         XCTAssertEqual(state.dashboardActiveTask?.id, c.id)
     }
 }

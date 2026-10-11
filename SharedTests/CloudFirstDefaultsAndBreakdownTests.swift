@@ -290,7 +290,7 @@ final class CloudFirstDefaultsAndBreakdownTests: XCTestCase {
         state.applyBreakdownFetchResult(
             ["Open Framer", "Draft the real headline"],
             heuristicFloor: [],
-            session: 0
+            session: 1 // `openBreakdown` above bumped `breakdownSession` 0 -> 1; session 0 would be stale
         )
         guard case .loaded(let steps) = state.breakdownFetchState else {
             return XCTFail("setup failed to reach .loaded")

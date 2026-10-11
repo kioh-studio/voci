@@ -181,7 +181,10 @@ final class ReminderScheduler: NSObject {
     /// Call once at launch; also called automatically on `NSWorkspace.didWakeNotification` (see
     /// `init`). O(n) in the number of persisted tasks/records: one `TaskStore.fetchAll()`, one
     /// records fetch, one dictionary build — no nested re-fetching per record.
-    func rebuildFromStorage() {
+    /// Returns the async recovery pass (reconcile -> fire due-but-missed -> refill) so a caller
+    /// that must observe its outcome (tests) can `await` it; production callers ignore it.
+    @discardableResult
+    func rebuildFromStorage() -> _Concurrency.Task<Void, Never> {
         let now = Date()
         let tasks = store.fetchAll()
         // WG-nudge: this used to require `$0.deadline != nil` too, so an open task with no
@@ -209,7 +212,7 @@ final class ReminderScheduler: NSObject {
         // due-but-missed pass + refill, in that order) moves inside a single `_Concurrency.Task`
         // hop — same fire-and-forget pattern `refillSystemRequests()` already uses elsewhere in
         // this file — so callers keep calling this as a plain synchronous method.
-        _Concurrency.Task { @MainActor [weak self] in
+        return _Concurrency.Task { @MainActor [weak self] in
             guard let self else { return }
             await self.reconcileDeliveredNotifications()
 

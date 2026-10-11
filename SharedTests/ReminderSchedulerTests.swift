@@ -143,7 +143,7 @@ final class ReminderSchedulerTests: XCTestCase {
     /// past-due `policy.offsets` marks (e.g. "at deadline") as fresh `.scheduled` rows and re-fire
     /// a notification the user already received. See `ensureDerived`'s doc comment for why this
     /// is deliberately NOT symmetric with the no-deadline case above.
-    func testDeadlineTaskDoesNotRederiveOnceEveryReminderHasFired() throws {
+    func testDeadlineTaskDoesNotRederiveOnceEveryReminderHasFired() async throws {
         let (scheduler, store) = try makeScheduler()
         let deadline = Date().addingTimeInterval(-2 * 3600) // already overdue
         let item = TaskItem(
@@ -151,7 +151,7 @@ final class ReminderSchedulerTests: XCTestCase {
         )
         store.add(item)
 
-        scheduler.rebuildFromStorage()
+        await scheduler.rebuildFromStorage().value
         let firstBatch = scheduler.recordsForTask(item.id)
         XCTAssertFalse(firstBatch.isEmpty)
         XCTAssertTrue(
@@ -159,7 +159,7 @@ final class ReminderSchedulerTests: XCTestCase {
             "an overdue open task's reminders fire immediately on recovery"
         )
 
-        scheduler.rebuildFromStorage()
+        await scheduler.rebuildFromStorage().value
         let afterSecondRebuild = scheduler.recordsForTask(item.id)
 
         XCTAssertEqual(
@@ -205,7 +205,7 @@ final class ReminderSchedulerTests: XCTestCase {
 
     // MARK: - overdue-while-closed fires once
 
-    func testOverdueReminderFiresOnceOnRecovery() throws {
+    func testOverdueReminderFiresOnceOnRecovery() async throws {
         let (scheduler, store) = try makeScheduler()
         // Deadline 2 hours in the past: the (now single, at-deadline) default-policy mark is
         // already due at derivation time — `ReminderRecord.derive`'s overdue guard skips the
@@ -216,7 +216,7 @@ final class ReminderSchedulerTests: XCTestCase {
         )
         store.add(item)
 
-        scheduler.rebuildFromStorage()
+        await scheduler.rebuildFromStorage().value
         let afterFirst = scheduler.recordsForTask(item.id)
         XCTAssertFalse(afterFirst.isEmpty)
         XCTAssertTrue(
@@ -225,7 +225,7 @@ final class ReminderSchedulerTests: XCTestCase {
         )
 
         // A second rebuild (e.g. a second wake) must NOT re-fire already-delivered records.
-        scheduler.rebuildFromStorage()
+        await scheduler.rebuildFromStorage().value
         let afterSecond = scheduler.recordsForTask(item.id)
         XCTAssertEqual(
             afterFirst.map(\.state).sorted(), afterSecond.map(\.state).sorted(),

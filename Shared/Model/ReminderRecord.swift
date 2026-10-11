@@ -319,6 +319,9 @@ extension ReminderRecord {
             if index < baseOffsets.count {
                 offset = baseOffsets[index]
             } else {
+                // Fixed list still has future marks: don't pad with tail marks. The tail is only
+                // a top-up (ensureDerived re-derives once nothing future is left scheduled).
+                if !kept.isEmpty { break }
                 // Past the end of the fixed list: keep adding `noDeadlineRepeatInterval` past the
                 // list's last entry, forever ("lặp mãi mỗi 3 ngày").
                 let stepsIntoRepeat = index - baseOffsets.count + 1
