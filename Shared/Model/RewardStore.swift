@@ -104,7 +104,7 @@ extension TaskStore {
         let doomed = Set(RewardRules.duplicateGrantIDsToTombstone(grants.map { (item: $0.asItem, updatedAt: $0.updatedAt) }))
         guard !doomed.isEmpty else { return }
         withoutStamping {
-            let stamp = Date()
+            let stamp = TaskStore.syncStamp()
             for model in grants where doomed.contains(model.id) {
                 model.deletedAt = stamp
                 model.updatedAt = stamp
@@ -131,7 +131,8 @@ extension TaskStore: SyncRewardStoring {
         guard !confirmations.isEmpty else { return }
         withoutStamping {
             for (id, confirmedUpdatedAt) in confirmations {
-                fetchRewardModelIncludingDeleted(id)?.syncedAt = confirmedUpdatedAt
+                guard let model = fetchRewardModelIncludingDeleted(id) else { continue }
+                model.syncedAt = TaskStore.confirmedStamp(confirmedUpdatedAt, local: model.updatedAt)
             }
             save()
         }

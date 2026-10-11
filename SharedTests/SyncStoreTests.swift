@@ -308,4 +308,17 @@ final class SyncStoreTests: XCTestCase {
 
         XCTAssertEqual(count, 1, "only the never-before-seen id should be counted/inserted")
     }
+
+    /// First CI integration run (2026-10-11): the server echoes `updatedAt` with millisecond
+    /// precision, so a confirmation a few microseconds below the local stamp must still clear
+    /// `isPendingSync` — otherwise every row is re-pushed on every poll forever.
+    func testMarkSyncedToleratesMillisecondPrecisionLoss() throws {
+        let store = try makeStore()
+        let id = UUID()
+        store.add(TaskItem(id: id, title: "ms", priority: .medium, when: .now))
+        let pending = try XCTUnwrap(store.pendingForSync(limit: 10).first { $0.item.id == id })
+        XCTAssertEqual(pending.updatedAt.timeIntervalSince1970 * 1000, (pending.updatedAt.timeIntervalSince1970 * 1000).rounded(.down), accuracy: 0.0001, "stamps are ms-truncated")
+        store.markSynced([id: pending.updatedAt.addingTimeInterval(-0.0005)])
+        XCTAssertNil(store.pendingForSync(limit: 10).first { $0.item.id == id })
+    }
 }

@@ -750,9 +750,23 @@ final class TaskStore {
     /// this (see their doc comments) — losing a confirmation is harmless (just re-pushes once
     /// more), the asymmetric case is losing an APPLY.
     // Internal: used by the `RewardStore.swift` extension.
+    /// The logical clock, truncated to MILLISECONDS. The wire format (`SyncDate`) carries 3
+    /// fractional digits, so a microsecond `Date()` stamp could never equal the value the server
+    /// echoes back — `markSynced` would set `syncedAt` a few µs BELOW `updatedAt` and the row would
+    /// stay `isPendingSync` forever, re-pushed on every poll (first CI integration run, 2026-10-11).
+    static func syncStamp(_ now: Date = Date()) -> Date {
+        Date(timeIntervalSince1970: (now.timeIntervalSince1970 * 1000).rounded(.down) / 1000)
+    }
+
+    /// `confirmed` came back through the wire (ms precision); a row stamped before `syncStamp`
+    /// existed (µs) must still count as confirmed when the two agree to within a couple of ms.
+    static func confirmedStamp(_ confirmed: Date, local: Date) -> Date {
+        abs(confirmed.timeIntervalSince(local)) < 0.002 ? local : confirmed
+    }
+
     func saveThrowing() throws {
         if !suppressStamp {
-            let stamp = Date()
+            let stamp = Self.syncStamp()
             for model in context.insertedModelsArray + context.changedModelsArray {
                 (model as? VolarTask)?.updatedAt = stamp
                 (model as? RewardRecord)?.updatedAt = stamp
@@ -803,7 +817,8 @@ extension TaskStore: SyncTaskStoring {
         guard !confirmations.isEmpty else { return }
         withoutStamping {
             for (id, confirmedUpdatedAt) in confirmations {
-                fetchModelIncludingDeleted(id)?.syncedAt = confirmedUpdatedAt
+                guard let model = fetchModelIncludingDeleted(id) else { continue }
+                model.syncedAt = Self.confirmedStamp(confirmedUpdatedAt, local: model.updatedAt)
             }
             save()
         }
@@ -954,7 +969,7 @@ extension TaskStore: SyncTaskStoring {
         let frogs = fetchAllModels().filter(\.frog)
         guard frogs.count > 1, let winner = frogs.max(by: { $0.updatedAt < $1.updatedAt }) else { return }
         withoutStamping {
-            let stamp = Date()
+            let stamp = Self.syncStamp()
             for model in frogs where model.id != winner.id {
                 model.frog = false
                 model.updatedAt = stamp
