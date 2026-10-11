@@ -86,8 +86,7 @@ struct SettingsIOSView: View {
     }
 
     private func loadNotificationStatus() async {
-        let settings = await UNUserNotificationCenter.current().notificationSettings()
-        switch settings.authorizationStatus {
+        switch await UNUserNotificationCenter.current().volarAuthorizationStatus() {
         case .authorized, .provisional, .ephemeral: notificationsStatus = "On"
         default: notificationsStatus = "Off"
         }
@@ -123,19 +122,10 @@ struct SettingsIOSView: View {
 
     @ViewBuilder
     private var signedOutAccountRows: some View {
-        Button {
-            appState.signInWithApple()
-        } label: {
-            Text("Sign in with Apple")
-                .font(IOSFont.button)
-                .frame(maxWidth: .infinity, minHeight: IOSLayout.minTouch)
-                .foregroundStyle(IOSPalette.onMint)
-        }
-        .listRowBackground(IOSPalette.mint)
-        .disabled(appState.accountBusy)
-
+        // Sign in with Apple is not wired anywhere in the app yet (`AppState` has no such API; the
+        // old `appState.signInWithApple()` call never compiled) — email OTP is the only sign-in path.
         VStack(alignment: .leading, spacing: 8) {
-            meta("or sign in with email", color: IOSPalette.fg3)
+            meta("Sign in with email", color: IOSPalette.fg3)
 
             HStack(spacing: 10) {
                 TextField("you@example.com", text: $accountEmailInput)

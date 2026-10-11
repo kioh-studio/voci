@@ -178,6 +178,26 @@ struct SettingsView: View {
 
     private var accentColors: Accent { appState.accent.accent }
 
+    /// Small pill button used across the settings cards. Restored 2026-10-11: it was dropped with
+    /// the Claude Code block in dfb12d7 while 14 call sites kept using it (first CI build).
+    private func settingsPillButton(_ title: String, solid: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(solid ? .white : VolarColor.textPri)
+                .padding(.horizontal, 14)
+                .frame(height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(solid ? accentColors.solid : VolarColor.surfaceHi)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(solid ? VolarColor.veil(0.18) : VolarColor.borderHi, lineWidth: 0.5)
+        )
+    }
+
     private var tabStrip: some View {
         HStack(spacing: 4) {
             ForEach(Tab.allCases) { t in
@@ -779,8 +799,7 @@ struct SettingsView: View {
         speechAuthStatus = SFSpeechRecognizer.authorizationStatus()
         appState.calendarAccess.refreshStatus()
         Task {
-            let settings = await UNUserNotificationCenter.current().notificationSettings()
-            notifAuthStatus = settings.authorizationStatus
+            notifAuthStatus = await UNUserNotificationCenter.current().volarAuthorizationStatus()
         }
     }
 
