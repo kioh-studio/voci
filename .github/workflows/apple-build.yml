@@ -43,21 +43,23 @@ jobs:
       - name: Sign in the CI sync account (integration test session)
         id: sync_session
         if: always()
+        continue-on-error: true
         env:
           EMAIL: ${{ secrets.VOLAR_SYNC_TEST_EMAIL }}
           PASSWORD: ${{ secrets.VOLAR_SYNC_TEST_PASSWORD }}
+          SB_URL: https://cjaamylayaylbuuhwlnz.supabase.co
+          SB_KEY: sb_publishable_WkBa-2lGcl10NBf8JrCfJA__FPNjjf0
         run: |
           if [ -z "$EMAIL" ]; then echo 'no sync secrets; integration test will be skipped'; exit 0; fi
-          RESP=$(curl -s -X POST 'https://cjaamylayaylbuuhwlnz.supabase.co/auth/v1/token?grant_type=password' \n            -H 'apikey: sb_publishable_WkBa-2lGcl10NBf8JrCfJA__FPNjjf0' -H 'Content-Type: application/json' \n            -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}")
-          JWT=$(echo "$RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("access_token",""))')
-          REFRESH=$(echo "$RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("refresh_token",""))')
-          UID=$(echo "$RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("user",{}).get("id",""))')
+          BODY=$(python3 -c 'import json,os; print(json.dumps({"email": os.environ["EMAIL"], "password": os.environ["PASSWORD"]}))')
+          RESP=$(curl -sS -X POST "$SB_URL/auth/v1/token?grant_type=password" -H "apikey: $SB_KEY" -H 'Content-Type: application/json' -d "$BODY") || { echo 'curl failed'; exit 0; }
+          JWT=$(printf '%s' "$RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("access_token",""))')
+          REFRESH=$(printf '%s' "$RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("refresh_token",""))')
+          UID=$(printf '%s' "$RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("user",{}).get("id",""))')
+          if [ -z "$JWT" ]; then echo 'password grant failed (test will be skipped)'; printf '%s' "$RESP" | head -c 200; echo; exit 0; fi
           echo "::add-mask::$JWT"; echo "::add-mask::$REFRESH"
-          echo "TEST_RUNNER_VOLAR_SYNC_TEST_JWT=$JWT" >> "$GITHUB_ENV"
-          echo "TEST_RUNNER_VOLAR_SYNC_TEST_REFRESH=$REFRESH" >> "$GITHUB_ENV"
-          echo "TEST_RUNNER_VOLAR_SYNC_TEST_UID=$UID" >> "$GITHUB_ENV"
-          echo "TEST_RUNNER_VOLAR_SYNC_TEST_EMAIL=$EMAIL" >> "$GITHUB_ENV"
-          [ -n "$JWT" ] && echo 'session ok' || echo 'password grant failed (test will be skipped)'
+          { echo "TEST_RUNNER_VOLAR_SYNC_TEST_JWT=$JWT"; echo "TEST_RUNNER_VOLAR_SYNC_TEST_REFRESH=$REFRESH"; echo "TEST_RUNNER_VOLAR_SYNC_TEST_UID=$UID"; echo "TEST_RUNNER_VOLAR_SYNC_TEST_EMAIL=$EMAIL"; } >> "$GITHUB_ENV"
+          echo 'session ok'
 
       - name: Build macOS
         id: build_mac

@@ -29,7 +29,7 @@ final class SyncIntegrationTests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition() {
             if Date() > deadline { XCTFail("timed out waiting for: \(what)"); return }
-            try await Task.sleep(nanoseconds: 500_000_000)
+            try await _Concurrency.Task.sleep(nanoseconds: 500_000_000) // `Task` alone resolves to VolarCore.Task here
         }
     }
 
