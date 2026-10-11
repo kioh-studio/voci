@@ -810,6 +810,13 @@ final class ReminderScheduler: NSObject {
         content.body = "\(task.title) \u{2014} \(timingPhrase(offsetKind: offsetKind))"
         content.sound = .default
         content.categoryIdentifier = NotificationActions.category(forOffsetKind: offsetKind)
+        #if os(iOS)
+        // 011 contract §7: due-now / due-in-an-hour break through Focus. UNVERIFIED: needs the time-sensitive entitlement.
+        if UserDefaults.standard.object(forKey: "volar.reminders.timeSensitive") as? Bool ?? true,
+           offsetKind == "at" || offsetKind == "-1h" {
+            content.interruptionLevel = .timeSensitive
+        }
+        #endif
         return content
     }
 

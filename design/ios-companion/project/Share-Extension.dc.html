@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Share to Volar</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#66D4CF}a:hover{color:#8FE3DF}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; position: relative; overflow: hidden; background: #0E0F11; color: #F2F2F7; font-family: 'Geist', -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <div style="position: absolute; top: 120px; left: 16px; right: 70px; display: flex; flex-direction: column; gap: 4px">
+    <span style="font-size: 12px; color: #74787E; padding-left: 12px">Lan</span>
+    <div style="align-self: flex-start; background: #3A3A3C; color: #FFFFFF; font-size: 15px; line-height: 1.35; padding: 10px 14px; border-radius: 18px">Can you send me the signed NDA before Monday?</div>
+  </div>
+  <div style="position: absolute; inset: 0; background: rgba(0,0,0,0.55)"></div>
+
+  <div style="position: absolute; left: 0; right: 0; top: 330px; bottom: 0; background: #232326; border-radius: 28px 28px 0 0; box-sizing: border-box; padding: 0 22px">
+    <div style="position: absolute; top: 8px; left: 177px; width: 36px; height: 5px; border-radius: 3px; background: #5A5A5E"></div>
+    <div style="display: flex; align-items: center; justify-content: space-between; height: 44px; margin-top: 20px">
+      <button style="width: 70px; height: 44px; background: none; border: none; padding: 0; text-align: left; color: #66D4CF; font-family: inherit; font-size: 17px">Cancel</button>
+      <span style="font-size: 17px; font-weight: 600">Add to Volar</span>
+      <button style="width: 70px; height: 44px; background: none; border: none; padding: 0; text-align: right; color: #66D4CF; font-family: inherit; font-size: 17px; font-weight: 600">Add</button>
+    </div>
+
+    <div style="background: #2C2C2E; border-radius: 14px; padding: 14px; margin-top: 12px; font-size: 17px; font-weight: 600; line-height: 1.3">Send the signed NDA to Lan</div>
+    <div style="display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 13px; color: #A0A4AA">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"></path></svg>
+      <span>From Messages · Lan</span>
+    </div>
+
+    <div style="display: flex; gap: 8px; margin-top: 16px">
+      <button style="height: 44px; padding: 0 14px; border-radius: 999px; background: #2C2C2E; border: 1px solid rgba(255,255,255,0.10); color: #F2F2F7; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 13px; display: inline-flex; align-items: center; gap: 8px">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="16" rx="3"></rect><path d="M4 10h16M8 3v4M16 3v4"></path></svg>Mon, Oct 6</button>
+      <button style="height: 44px; padding: 0 14px; border-radius: 999px; background: #2C2C2E; border: 1px solid rgba(255,255,255,0.10); color: #F2F2F7; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 13px; display: inline-flex; align-items: center; gap: 8px">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4"></path><path d="M5 4h11l-2 4 2 4H5"></path></svg><span style="width: 6px; height: 6px; border-radius: 3px; background: #FF9F6B"></span>High</button>
+    </div>
+
+    <div style="display: flex; align-items: center; justify-content: space-between; height: 52px; margin-top: 16px; background: #2C2C2E; border-radius: 14px; padding: 0 14px">
+      <span style="font-size: 16px; font-weight: 500">Keep the original message</span>
+      <div style="width: 51px; height: 31px; border-radius: 16px; background: #66D4CF; position: relative; flex: none"><div style="position: absolute; top: 2px; right: 2px; width: 27px; height: 27px; border-radius: 14px; background: #FFFFFF"></div></div>
+    </div>
+    <div style="font-size: 13px; color: #74787E; margin-top: 10px; padding: 0 4px">Volar suggested the title and date — tap to change.</div>
+
+    <button style="position: absolute; left: 22px; right: 22px; bottom: 34px; height: 52px; border: none; border-radius: 14px; background: linear-gradient(180deg,#8FE3DF,#66D4CF); color: #06201F; font-family: inherit; font-size: 16px; font-weight: 600">Add task</button>
+  </div>
+  <div style="position: absolute; left: 128px; bottom: 8px; width: 134px; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.6)"></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

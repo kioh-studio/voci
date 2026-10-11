@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Now — nothing on your plate</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#66D4CF}a:hover{color:#8FE3DF}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; position: relative; overflow: hidden; background: #0E0F11; color: #F2F2F7; font-family: 'Geist', -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <div style="position: absolute; left: 22px; right: 22px; top: 59px; display: flex; align-items: baseline; gap: 12px">
+    <h1 style="margin: 0; font-size: 30px; font-weight: 600; letter-spacing: -0.02em; line-height: 36px">Now</h1>
+    <span style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 13px; color: #74787E">Sat, Oct 4</span>
+  </div>
+
+  <div style="position: absolute; left: 22px; right: 22px; top: 290px; display: flex; flex-direction: column; gap: 14px">
+    <h2 style="margin: 0; font-size: 30px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.14; color: #74787E">Nothing on your plate.</h2>
+    <p style="margin: 0; font-size: 15px; line-height: 1.55; color: #A0A4AA">Tap the mic and say what needs doing — all of it, in one breath. Volar writes it down and works out the order.</p>
+  </div>
+
+  <button aria-label="Add task by voice" style="position: absolute; left: 163px; bottom: 96px; width: 64px; height: 64px; border: 0; border-radius: 50%; background: #66D4CF; color: #06201F; box-shadow: 0 8px 24px rgba(102,212,207,0.30); display: flex; align-items: center; justify-content: center; cursor: pointer">
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0"></path><path d="M12 18v3"></path></svg>
+  </button>
+
+  <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 83px; box-sizing: border-box; background: rgba(14,15,17,0.92); border-top: 1px solid rgba(255,255,255,0.10); display: flex">
+    <button style="flex: 1; height: 49px; border: 0; background: none; color: #66D4CF; font-family: inherit; font-size: 10px; font-weight: 500; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: pointer">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="4"></circle></svg>Now</button>
+    <button style="flex: 1; height: 49px; border: 0; background: none; color: #74787E; font-family: inherit; font-size: 10px; font-weight: 500; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: pointer">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4"></path><path d="M5 4h12l-2 4 2 4H5"></path></svg>Goals</button>
+    <button style="flex: 1; height: 49px; border: 0; background: none; color: #74787E; font-family: inherit; font-size: 10px; font-weight: 500; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: pointer">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"></rect><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"></rect><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"></rect><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"></rect></svg>Views</button>
+  </div>
+  <div style="position: absolute; left: 128px; bottom: 8px; width: 134px; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.6)"></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

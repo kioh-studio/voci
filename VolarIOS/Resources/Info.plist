@@ -88,5 +88,25 @@
 			</array>
 		</dict>
 	</array>
+	<!-- Bundled Geist fonts (OFL). xcodegen flattens Resources/Fonts into the bundle root, so names are bare. -->
+	<key>UIAppFonts</key>
+	<array>
+		<string>Geist-Regular.ttf</string>
+		<string>Geist-Medium.ttf</string>
+		<string>Geist-SemiBold.ttf</string>
+		<string>Geist-Bold.ttf</string>
+		<string>GeistMono-Regular.ttf</string>
+		<string>GeistMono-Medium.ttf</string>
+		<string>GeistMono-SemiBold.ttf</string>
+	</array>
+	<!-- 011: background refresh (BGAppRefreshTask) runs a sync round. -->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>tech.kioh.Volar.refresh</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
 </dict>
 </plist>

@@ -1,134 +1,99 @@
-// VolarIOS/Sources/Views/SettingsIOSView.swift — iOS Settings screen (Phase 1, agent A6).
-//
-// Native `NavigationStack` + `List` (`.insetGrouped`) — NOT a pixel-copy of the macOS Settings
-// window (`Volar/Sources/Views/SettingsView.swift`, READ ONLY, source-of-truth for WHICH settings
-// exist and what each one does). This view mirrors that file's *content* across 6 sections, but
-// composes it the iOS-native way: List sections + footers instead of a custom tab strip and boxed
-// `SettingsRow`s. Native-first is the stated fidelity choice for this project (docs/app-architecture.md).
-//
-// Design contract (specs/004-ios-port/plan.md §4, frozen for every Phase-1 agent, A2's contract):
-//   - Colors/fonts/motion ONLY from `VolarColor` / `appState.accent.accent` / `VolarMotion` /
-//     `Font.volar(size:weight:)` / `IOSMetrics`. Never a hardcoded hex, never
-//     `Color.white.opacity(_:)` (use `VolarColor.veil(_:)` instead).
-//   - Mint (`VolarColor.nowAccent*`) is reserved for the single NOW task and never appears here.
-//     The accent-color swatches below are the one legitimate exception on this screen: they render
-//     `VolarAccent.allCases`' own colors verbatim, which is correct per the contract.
-//   - Dark-only. Every tappable element >= 44x44pt (`IOSMetrics.minTouch`).
-//
-// `IOSMetrics` (agent A2, `VolarIOS/Sources/Design/IOSMetrics.swift`) had NOT landed in the repo
-// yet when this file was written (verified via Glob — only `VolarIOS/project.yml`/`Resources`/
-// `Tests/_Placeholder.swift` exist so far). Every `IOSMetrics.*` reference below follows the frozen
-// signature from the task contract exactly:
-//   enum IOSMetrics {
-//       static let screenTitle, eyebrow, nowTitle, rowTitle, meta, sectionHeader, caption: Font
-//       static let titleTracking, eyebrowTracking, sectionTracking: CGFloat
-//       static let screenPadH, cardPadH, cardRadius, nowCardRadius, sheetRadius, minTouch, fabSize: CGFloat
-//       static func rowPadY(_ density: Density) -> CGFloat
-//   }
-// This is UNVERIFIED until that file exists and both compile together — flagged again in the
-// self-review at the bottom of the PR description / final report.
+// VolarIOS/Sources/Views/SettingsIOSView.swift — iOS Settings (feature 011, design/ios-companion/
+// project/Settings.dc.html). Pushed from the Views tab (no NavigationStack of its own).
+// Section order: Account, Sync, Capture, Goal rewards, Reminders, Subscription, Appearance, Voice,
+// Privacy, About. All account/sync/StoreKit logic is unchanged and calls straight into `AppState`.
+// UNVERIFIED: written blind on Windows, never compiled.
 import SwiftUI
 import Speech
 import StoreKit
 import UIKit
+import UserNotifications
 
 struct SettingsIOSView: View {
     @Environment(AppState.self) private var appState
 
-    // MARK: - Local UI-only state
-    //
-    // Mirrors `SettingsView.swift`'s own convention: these are cosmetic/local `@State` for the
-    // multi-step sign-in forms only. The actual session/tier/quota/busy/error state lives on
-    // `AppState` (`accountEmail`, `accountTier`, `subscriptionStatus`, `accountBusy`,
-    // `accountError`) and is read directly below — this file does not invent a second state
-    // machine for account/StoreKit flows.
+    @AppStorage("volar.view.goalRewards") private var goalRewardsOn = false
+    @AppStorage("volar.reminders.timeSensitive") private var timeSensitive = true
+
     @State private var accountEmailInput = ""
     @State private var accountCodeInput = ""
     @State private var accountCodeSent = false
     @State private var showDeleteAccountConfirm = false
-    // 008-sync (client-contract.md §0 group C) — same split as the rest of this file: purely local
-    // UI state, real state lives on `AppState`. Mirrors `SettingsView.swift`'s (macOS) three sync
-    // `@State` vars exactly — same names, same meaning, so the two files can never drift on what
-    // each flag is for.
     @State private var showSyncEnableSheet = false
     @State private var showSyncRejects = false
     @State private var showSyncPurgeConfirm = false
-    /// Gates the one-time "this downloads ~145MB, do it on Wi-Fi" warning before actually calling
-    /// `appState.setSpeechEngine(.whisperKit)` — see `voiceSection`'s doc comment on why this is a
-    /// UI-level confirmation only, not real network-type gating.
     @State private var pendingWhisperKitConfirm = false
-
-    private var accentColors: Accent { appState.accent.accent }
+    @State private var notificationsStatus: String?
 
     var body: some View {
-        NavigationStack {
-            List {
-                accountSection
-                subscriptionSection
-                syncSection
-                appearanceSection
-                voiceSection
-                privacySection
-                aboutSection
-            }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .background(VolarColor.bg.ignoresSafeArea())
-            .navigationTitle("Settings")
-            .tint(accentColors.solid)
-            .alert("Delete your Volar account?", isPresented: $showDeleteAccountConfirm) {
-                Button("Delete", role: .destructive) { appState.deleteAccount() }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This cannot be undone — your tasks stay on this iPhone, but your account, subscription link, and quota history are permanently removed.")
-            }
-            .alert("Download the WhisperKit model?", isPresented: $pendingWhisperKitConfirm) {
-                Button("Download & Enable") { appState.setSpeechEngine(.whisperKit) }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("WhisperKit needs a one-time on-device model download (about 145MB) before it can transcribe. This can take a while and use meaningful cellular data — we recommend doing this on Wi-Fi. Volar does not check your connection type before starting the download; that gating isn't implemented yet.")
-            }
-            // 008-sync: "Delete data on server" — note it says SERVER explicitly and nowhere claims
-            // to touch this iPhone's own tasks, matching macOS `SettingsView`'s identical dialog
-            // copy verbatim (client-contract.md §5: the two platforms must not say two things).
-            .alert("Delete this account's synced data on Volar's server?", isPresented: $showSyncPurgeConfirm) {
-                Button("Delete server data", role: .destructive) { appState.purgeSyncData() }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Your tasks on THIS iPhone (and every other signed-in device) are not touched — this only clears the server-side copy. Sync will start re-uploading from whatever devices are still syncing.")
-            }
-            .sheet(isPresented: $showSyncEnableSheet) {
-                SyncEnableSheet()
-            }
-            .sheet(isPresented: $showSyncRejects) {
-                SyncRejectsView()
-            }
-            .onAppear {
-                appState.refreshSyncState()
-            }
+        List {
+            accountSection
+            syncSection
+            captureSection
+            goalRewardsSection
+            remindersSection
+            subscriptionSection
+            appearanceSection
+            voiceSection
+            privacySection
+            aboutSection
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(IOSPalette.bg.ignoresSafeArea())
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
+        .toolbarBackground(IOSPalette.bg, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .tint(IOSPalette.mint)
+        .alert("Delete your Volar account?", isPresented: $showDeleteAccountConfirm) {
+            Button("Delete", role: .destructive) { appState.deleteAccount() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This cannot be undone — your tasks stay on this iPhone, but your account, subscription link, and quota history are permanently removed.")
+        }
+        .alert("Download the WhisperKit model?", isPresented: $pendingWhisperKitConfirm) {
+            Button("Download & Enable") { appState.setSpeechEngine(.whisperKit) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("WhisperKit needs a one-time on-device model download (about 145MB) before it can transcribe. This can take a while and use meaningful cellular data — we recommend doing this on Wi-Fi. Volar does not check your connection type before starting the download; that gating isn't implemented yet.")
+        }
+        .alert("Delete this account's synced data on Volar's server?", isPresented: $showSyncPurgeConfirm) {
+            Button("Delete server data", role: .destructive) { appState.purgeSyncData() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your tasks on THIS iPhone (and every other signed-in device) are not touched — this only clears the server-side copy. Sync will start re-uploading from whatever devices are still syncing.")
+        }
+        .sheet(isPresented: $showSyncEnableSheet) { SyncEnableSheet() }
+        .sheet(isPresented: $showSyncRejects) { SyncRejectsView() }
+        .onAppear { appState.refreshSyncState() }
+        .task { await loadNotificationStatus() }
+    }
+
+    // MARK: - Row helpers
+
+    private func rowTitle(_ s: String) -> some View {
+        Text(s).font(IOSFont.rowTitle).foregroundStyle(IOSPalette.fg)
+    }
+
+    private func meta(_ s: String, color: Color = IOSPalette.fg2) -> some View {
+        Text(s).font(IOSFont.meta).foregroundStyle(color)
+    }
+
+    private func footer(_ s: String) -> some View {
+        Text(s).font(IOSFont.meta).foregroundStyle(IOSPalette.fg2)
+    }
+
+    private func loadNotificationStatus() async {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral: notificationsStatus = "On"
+        default: notificationsStatus = "Off"
         }
     }
 
-    // MARK: - Shared row/section helpers
-
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(IOSMetrics.sectionHeader)
-            .tracking(IOSMetrics.sectionTracking)
-            .foregroundStyle(VolarColor.textMut)
-    }
-
-    private func footerText(_ s: String) -> some View {
-        Text(s)
-            .font(IOSMetrics.caption)
-            .foregroundStyle(VolarColor.textSec)
-    }
-
-    // MARK: - 1. Account
-    // Ported from `SettingsView.swift`'s `accountTab`/`accountCard` (Task 4, account-auth.md).
-    // Signed-out: Sign in with Apple + email OTP. Signed-in: email, tier badge, quota, sign out,
-    // delete account. Every action below calls straight into the existing `AppState` methods —
-    // no second auth state machine, per the task contract.
+    // MARK: - Account
 
     private var accountSection: some View {
         Section {
@@ -139,23 +104,21 @@ struct SettingsIOSView: View {
             }
             if appState.accountBusy {
                 HStack(spacing: 8) {
-                    ProgressView().tint(accentColors.solid)
-                    Text("Working…").font(IOSMetrics.caption).foregroundStyle(VolarColor.textSec)
+                    ProgressView().tint(IOSPalette.mint)
+                    meta("Working…")
                 }
             }
             if let accountError = appState.accountError {
-                Text(accountError)
-                    .font(IOSMetrics.caption)
-                    .foregroundStyle(VolarColor.reschedule)
+                meta(accountError, color: IOSPalette.high)
             }
         } header: {
-            sectionHeader("Account")
+            SectionLabel("Account")
         } footer: {
-            footerText(appState.accountEmail == nil
+            footer(appState.accountEmail == nil
                 ? "Sign in to unlock Cloud parsing and Groq speech transcription. Volar's core (capture, tasks, reminders, focus) never requires an account."
                 : "Manage your Volar account, subscription, and daily AI quota.")
         }
-        .listRowBackground(VolarColor.card)
+        .listRowBackground(IOSPalette.surface)
     }
 
     @ViewBuilder
@@ -164,21 +127,20 @@ struct SettingsIOSView: View {
             appState.signInWithApple()
         } label: {
             Text("Sign in with Apple")
-                .font(IOSMetrics.rowTitle)
-                .frame(maxWidth: .infinity, minHeight: IOSMetrics.minTouch)
-                .foregroundStyle(.white)
+                .font(IOSFont.button)
+                .frame(maxWidth: .infinity, minHeight: IOSLayout.minTouch)
+                .foregroundStyle(IOSPalette.onMint)
         }
-        .listRowBackground(accentColors.solid)
+        .listRowBackground(IOSPalette.mint)
         .disabled(appState.accountBusy)
 
         VStack(alignment: .leading, spacing: 8) {
-            Text("or sign in with email")
-                .font(IOSMetrics.caption)
-                .foregroundStyle(VolarColor.textMut)
+            meta("or sign in with email", color: IOSPalette.fg3)
 
             HStack(spacing: 10) {
                 TextField("you@example.com", text: $accountEmailInput)
-                    .foregroundStyle(VolarColor.textPri)
+                    .font(IOSFont.body)
+                    .foregroundStyle(IOSPalette.fg)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.emailAddress)
@@ -186,25 +148,26 @@ struct SettingsIOSView: View {
                     accountCodeSent = true
                     appState.sendEmailOTP(email: accountEmailInput)
                 }
-                .font(IOSMetrics.caption)
-                .foregroundStyle(accentColors.solid)
+                .font(IOSFont.meta)
+                .foregroundStyle(IOSPalette.mint)
                 .disabled(appState.accountBusy || accountEmailInput.isEmpty)
             }
-            .frame(minHeight: IOSMetrics.minTouch)
+            .frame(minHeight: IOSLayout.minTouch)
 
             if accountCodeSent {
                 HStack(spacing: 10) {
                     TextField("6-digit code", text: $accountCodeInput)
-                        .foregroundStyle(VolarColor.textPri)
+                        .font(IOSFont.body)
+                        .foregroundStyle(IOSPalette.fg)
                         .keyboardType(.numberPad)
                     Button("Verify") {
                         appState.verifyEmailOTP(email: accountEmailInput, code: accountCodeInput)
                     }
-                    .font(IOSMetrics.caption)
-                    .foregroundStyle(accentColors.solid)
+                    .font(IOSFont.meta)
+                    .foregroundStyle(IOSPalette.mint)
                     .disabled(appState.accountBusy || accountCodeInput.count != 6)
                 }
-                .frame(minHeight: IOSMetrics.minTouch)
+                .frame(minHeight: IOSLayout.minTouch)
             }
         }
     }
@@ -212,55 +175,52 @@ struct SettingsIOSView: View {
     @ViewBuilder
     private func signedInAccountRows(email: String) -> some View {
         HStack {
-            Text(email).font(IOSMetrics.rowTitle).foregroundStyle(VolarColor.textPri)
+            VStack(alignment: .leading, spacing: 2) {
+                rowTitle("Signed in")
+                meta(email)
+            }
             Spacer()
             tierBadge
         }
+        .frame(minHeight: IOSLayout.minTouch)
 
         if let status = appState.subscriptionStatus {
-            Text("Parse: \(status.parseUsedToday)/\(status.parseLimit) AI calls today")
-                .font(IOSMetrics.caption)
-                .foregroundStyle(VolarColor.textSec)
+            meta("Parse: \(status.parseUsedToday)/\(status.parseLimit) AI calls today")
             if appState.accountTier == .pro {
-                Text("Speech: \(status.speechUsedToday)/\(status.speechLimit) calls today")
-                    .font(IOSMetrics.caption)
-                    .foregroundStyle(VolarColor.textSec)
+                meta("Speech: \(status.speechUsedToday)/\(status.speechLimit) calls today")
             }
         }
 
         Button("Restore Purchases") { appState.restorePurchases() }
-            .foregroundStyle(accentColors.solid)
+            .font(IOSFont.rowTitle)
+            .foregroundStyle(IOSPalette.mint)
             .disabled(appState.accountBusy)
-            .frame(minHeight: IOSMetrics.minTouch)
+            .frame(minHeight: IOSLayout.minTouch)
         Button("Manage Subscription") { openManageSubscriptions() }
-            .foregroundStyle(accentColors.solid)
-            .frame(minHeight: IOSMetrics.minTouch)
+            .font(IOSFont.rowTitle)
+            .foregroundStyle(IOSPalette.mint)
+            .frame(minHeight: IOSLayout.minTouch)
         Button("Sign out") { appState.signOutAccount() }
-            .foregroundStyle(VolarColor.textPri)
-            .frame(minHeight: IOSMetrics.minTouch)
+            .font(IOSFont.rowTitle)
+            .foregroundStyle(IOSPalette.fg)
+            .frame(minHeight: IOSLayout.minTouch)
         Button("Delete account") { showDeleteAccountConfirm = true }
-            .foregroundStyle(VolarColor.destruct)
-            .frame(minHeight: IOSMetrics.minTouch)
+            .font(IOSFont.rowTitle)
+            .foregroundStyle(IOSPalette.destruct)
+            .frame(minHeight: IOSLayout.minTouch)
     }
 
     private var tierBadge: some View {
-        Text(appState.accountTier == .pro ? "Pro" : "Free")
-            .font(.system(size: 10.5, weight: .semibold))
-            .foregroundStyle(appState.accountTier == .pro ? VolarColor.done : VolarColor.textSec)
-            .padding(.horizontal, 8)
+        let pro = appState.accountTier == .pro
+        return Text(pro ? "Pro" : "Free")
+            .font(IOSFont.mono(12, .semibold))
+            .foregroundStyle(pro ? IOSPalette.mint : IOSPalette.fg2)
+            .padding(.horizontal, 10)
             .padding(.vertical, 3)
-            .background(
-                (appState.accountTier == .pro ? VolarColor.done : VolarColor.veil(1)).opacity(0.14)
-            )
-            .clipShape(Capsule())
+            .background(pro ? IOSPalette.mintSur : IOSPalette.surfaceHi, in: Capsule())
     }
 
-    /// macOS uses `NSWorkspace.shared.open(.../account/subscriptions)`. iOS has a native StoreKit 2
-    /// equivalent — `AppStore.showManageSubscriptions(in:)` — which is the better native-first
-    /// choice here (no need to leave the app for a web page). // UNVERIFIED: iOS-only API, not
-    /// exercised on a real device/simulator from this machine; the scene lookup mirrors
-    /// `AccountService.swift`'s existing `presentationAnchor` iOS branch (already landed, same
-    /// `UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first` pattern).
+    // UNVERIFIED: iOS-only StoreKit 2 API; scene lookup mirrors AccountService's presentationAnchor.
     private func openManageSubscriptions() {
         guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { return }
         Task { @MainActor in
@@ -268,139 +228,80 @@ struct SettingsIOSView: View {
         }
     }
 
-    // MARK: - 2. Subscription
-    // Ported from `SettingsView.swift`'s `upgradeSection`/`productRow` — same two `VolarProduct`s,
-    // prices always read from `product.displayPrice` (never hardcoded) so this is correct in every
-    // storefront/currency.
-
-    private var subscriptionSection: some View {
-        Section {
-            if appState.accountEmail == nil {
-                Text("Sign in above to subscribe.")
-                    .font(IOSMetrics.caption)
-                    .foregroundStyle(VolarColor.textMut)
-            } else if appState.accountTier == .pro {
-                HStack {
-                    VolarIcon(.check, size: 14, color: VolarColor.done)
-                    Text("You're on Volar Pro").font(IOSMetrics.rowTitle).foregroundStyle(VolarColor.textPri)
-                }
-            } else {
-                productRow(appState.monthlyProduct, which: .monthly)
-                productRow(appState.yearlyProduct, which: .yearly)
-            }
-        } header: {
-            sectionHeader("Subscription")
-        } footer: {
-            footerText("Volar Pro — 14-day free trial. Unlocks Cloud AI task parsing and Groq cloud speech transcription with a daily quota.")
-        }
-        .listRowBackground(VolarColor.card)
-    }
-
-    @ViewBuilder
-    private func productRow(_ product: Product?, which: VolarProduct) -> some View {
-        HStack {
-            Text(product?.displayName ?? (which == .monthly ? "Monthly" : "Yearly"))
-                .font(IOSMetrics.rowTitle)
-                .foregroundStyle(VolarColor.textPri)
-            Spacer()
-            if let product {
-                Button(product.displayPrice) { appState.purchase(which) }
-                    .font(IOSMetrics.rowTitle)
-                    .foregroundStyle(accentColors.solid)
-                    .disabled(appState.accountBusy)
-            } else {
-                Text("Unavailable").font(IOSMetrics.caption).foregroundStyle(VolarColor.textMut)
-            }
-        }
-        .frame(minHeight: IOSMetrics.minTouch)
-    }
-
-    // MARK: - 2b. Sync (008-sync, client-contract.md §0 group C)
-    // Ported from `SettingsView.swift`'s `syncCard` (macOS) — same content, same three-state
-    // copy, same account-level toggle; List-section layout instead of a boxed card, matching how
-    // every other section on this screen already trades macOS's card look for a native `Section`.
-    // Signed-in only, same guard `accountSection`'s "Delete account" row already applies.
+    // MARK: - Sync (008-sync; signed-in only)
 
     @ViewBuilder
     private var syncSection: some View {
         if appState.accountEmail != nil {
             Section {
-                Toggle(isOn: syncToggleBinding) {
-                    Text("Sync across devices").font(IOSMetrics.rowTitle).foregroundStyle(VolarColor.textPri)
-                }
-                .tint(accentColors.solid)
-                .frame(minHeight: IOSMetrics.minTouch)
-                // Rule 3 (task brief): turning OFF must always work, even with lapsed Pro — never
-                // gate this control on `syncState.isPro`. Only an in-flight request, or the state
-                // not having loaded yet (see `syncStateLoaded` below), disables it.
-                .disabled(appState.syncBusy || !appState.syncStateLoaded)
+                Toggle(isOn: syncToggleBinding) { rowTitle("Sync across devices") }
+                    .tint(IOSPalette.mint)
+                    .frame(minHeight: IOSLayout.minTouch)
+                    // Turning OFF must always work, even with lapsed Pro: never gate on isPro.
+                    .disabled(appState.syncBusy || !appState.syncStateLoaded)
 
-                // GATED on `syncStateLoaded` — before the first `refreshSyncState()` resolves,
-                // `syncState` is still `.unknown` (`isPro: false`); rendering `settingsStatusLine`
-                // off that would tell a real Pro user "Sync is a Pro feature." for one frame. Show
-                // nothing until we actually know (Opus review, 2026-08-10; mirrors macOS
-                // `SettingsView.syncCard` token-for-token so the two platforms can't disagree here).
+                // Gated on `syncStateLoaded`: before the first refresh `.unknown` would flash
+                // "Sync is a Pro feature." at a real Pro user.
                 if appState.syncStateLoaded {
                     if let statusLine = appState.syncState.settingsStatusLine {
-                        Text(statusLine).font(IOSMetrics.caption).foregroundStyle(VolarColor.textSec)
+                        meta(statusLine)
                     } else {
                         syncEnabledSummary
                     }
                 }
 
+                HStack {
+                    rowTitle("Last synced")
+                    Spacer()
+                    Text(appState.lastSyncSuccessAt.map { $0.formatted(date: .omitted, time: .shortened) } ?? "—")
+                        .font(IOSFont.mono(13))
+                        .foregroundStyle(IOSPalette.fg2)
+                }
+                .frame(minHeight: IOSLayout.minTouch)
+
                 if let syncError = appState.syncError {
-                    Text(syncError).font(IOSMetrics.caption).foregroundStyle(VolarColor.reschedule)
+                    meta(syncError, color: IOSPalette.high)
                 }
 
                 if appState.syncState.syncEnabled {
                     ForEach(appState.syncState.devices) { device in
                         HStack {
-                            Text(device.label ?? "Unknown device")
-                                .font(IOSMetrics.caption)
-                                .foregroundStyle(VolarColor.textSec)
+                            meta(device.label ?? "Unknown device")
                             Spacer()
                             if let lastSeen = device.lastSeen {
-                                Text(lastSeen.formatted(date: .abbreviated, time: .omitted))
-                                    .font(IOSMetrics.caption)
-                                    .foregroundStyle(VolarColor.textMut)
+                                meta(lastSeen.formatted(date: .abbreviated, time: .omitted), color: IOSPalette.fg3)
                             }
                         }
                     }
                 }
 
                 Button("View lost edits") { showSyncRejects = true }
-                    .foregroundStyle(accentColors.solid)
-                    .frame(minHeight: IOSMetrics.minTouch)
+                    .font(IOSFont.rowTitle)
+                    .foregroundStyle(IOSPalette.mint)
+                    .frame(minHeight: IOSLayout.minTouch)
                 if appState.syncState.syncEnabled {
                     Button("Re-sync from scratch") { appState.resyncFromScratch() }
-                        .foregroundStyle(accentColors.solid)
-                        .frame(minHeight: IOSMetrics.minTouch)
+                        .font(IOSFont.rowTitle)
+                        .foregroundStyle(IOSPalette.mint)
+                        .frame(minHeight: IOSLayout.minTouch)
                         .disabled(appState.syncBusy)
-                    // Valve 2 (design.md §6) — explains what the button above actually does, so no
-                    // confirmation dialog is needed: the action is harmless by construction and this
-                    // line says so. Mirrors macOS `SettingsView.syncCard` token-for-token except the
-                    // device noun.
-                    Text("Forgets where this iPhone left off and reads the whole account back from the server. Nothing on this iPhone is deleted — with a lot of tasks it can take a while.")
-                        .font(IOSMetrics.caption)
-                        .foregroundStyle(VolarColor.textSec)
+                    meta("Forgets where this iPhone left off and reads the whole account back from the server. Nothing on this iPhone is deleted — with a lot of tasks it can take a while.")
                 }
                 Button("Delete data on server") { showSyncPurgeConfirm = true }
-                    .foregroundStyle(VolarColor.destruct)
-                    .frame(minHeight: IOSMetrics.minTouch)
+                    .font(IOSFont.rowTitle)
+                    .foregroundStyle(IOSPalette.destruct)
+                    .frame(minHeight: IOSLayout.minTouch)
                     .disabled(appState.syncBusy)
             } header: {
-                sectionHeader("Sync")
+                SectionLabel("Sync")
             } footer: {
-                footerText("Keeps this iPhone's tasks in step with every other device signed in to this account. Turning sync off never deletes anything — use \"Delete data on server\" for that.")
+                footer("Your Mac and iPhone share one task list. Each device keeps a full copy.")
             }
-            .listRowBackground(VolarColor.card)
+            .listRowBackground(IOSPalette.surface)
         }
     }
 
-    /// Same "ON routes through the mandatory confirmation sheet ONLY when Pro, OFF calls straight
-    /// through with no confirmation" split as macOS `SettingsView.syncToggleBinding` (see that
-    /// property's doc comment for why a non-Pro attempt is a client-side no-op instead of a round
-    /// trip to the server) — design.md §8.1/§8.3.
+    /// ON routes through the confirmation sheet only when Pro; OFF calls straight through.
     private var syncToggleBinding: Binding<Bool> {
         Binding(
             get: { appState.syncState.syncEnabled },
@@ -423,32 +324,115 @@ struct SettingsIOSView: View {
             if let device = appState.syncState.enabledByDevice {
                 Text("Turned on from \(device)")
             }
-            if let lastSync = appState.lastSyncSuccessAt {
-                Text("Last synced \(lastSync.formatted(date: .omitted, time: .shortened))")
-            }
         }
-        .font(IOSMetrics.caption)
-        // Informational readout, not the NOW spotlight — `instrument` (ice blue), matching macOS
-        // `SettingsView.syncEnabledSummary` token-for-token.
-        .foregroundStyle(VolarColor.instrument)
+        .font(IOSFont.meta)
+        .foregroundStyle(IOSPalette.fg2)
     }
 
-    // MARK: - 3. Appearance
-    // Ported from `SettingsView.swift`'s `appearanceTab`: accent swatches, density, background
-    // (ambient) mode. Deliberately DOES NOT port the `NSOpenPanel` custom-image picker (see the
-    // omission list in the final report) — `.custom` is filtered out of the Background picker so
-    // it can never be selected with no way to actually choose an image.
+    // MARK: - Capture
+
+    private var captureSection: some View {
+        Section {
+            HStack(spacing: 8) {
+                rowTitle("Understand with cloud AI")
+                Spacer(minLength: 8)
+                Toggle("Understand with cloud AI", isOn: Binding(
+                    get: { appState.parseEnginePreference == .cloud },
+                    set: { appState.setParseEngine($0 ? .cloud : .onDevice) }
+                ))
+                .labelsHidden()
+                .tint(IOSPalette.mint)
+            }
+            .frame(minHeight: IOSLayout.minTouch)
+
+            if appState.parseEnginePreference == .cloud, !ConfigParseCredentialProvider.isConfigured {
+                meta("Sign in above to enable cloud parsing — every signed-in account gets a daily quota, free or Pro. Until you sign in, Volar quietly uses on-device parsing.")
+            }
+
+            ValueRow(icon: "mic", title: "Siri & Action Button", value: "Shortcuts", chevron: false)
+                .listRowInsets(EdgeInsets())
+        } header: {
+            SectionLabel("Capture")
+        } footer: {
+            footer("On-device stays private and free. Cloud AI sends only the TEXT of what you said — never audio — to our proxy for higher-quality parsing of trickier phrasing.")
+        }
+        .listRowBackground(IOSPalette.surface)
+    }
+
+    // MARK: - Goal rewards
+
+    private var goalRewardsSection: some View {
+        Section {
+            ToggleRow(icon: "flag", title: "Goal rewards", isOn: $goalRewardsOn)
+                .listRowInsets(EdgeInsets())
+        } header: {
+            SectionLabel("Goal rewards")
+        } footer: {
+            footer("Rewards you set yourself. No points, no streaks.")
+        }
+        .listRowBackground(IOSPalette.surface)
+    }
+
+    // MARK: - Reminders
+
+    private var remindersSection: some View {
+        Section {
+            ValueRow(icon: "bell", title: "Notifications", value: notificationsStatus, chevron: false)
+                .listRowInsets(EdgeInsets())
+            ToggleRow(icon: "clock", title: "Time-sensitive for deadlines", isOn: $timeSensitive)
+                .listRowInsets(EdgeInsets())
+        } header: {
+            SectionLabel("Reminders")
+        }
+        .listRowBackground(IOSPalette.surface)
+    }
+
+    // MARK: - Subscription
+
+    private var subscriptionSection: some View {
+        Section {
+            if appState.accountEmail == nil {
+                meta("Sign in above to subscribe.", color: IOSPalette.fg3)
+            } else if appState.accountTier == .pro {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark").foregroundStyle(IOSPalette.done)
+                    rowTitle("You're on Volar Pro")
+                }
+            } else {
+                productRow(appState.monthlyProduct, which: .monthly)
+                productRow(appState.yearlyProduct, which: .yearly)
+            }
+        } header: {
+            SectionLabel("Subscription")
+        } footer: {
+            footer("Volar Pro — 14-day free trial. Unlocks Cloud AI task parsing and Groq cloud speech transcription with a daily quota.")
+        }
+        .listRowBackground(IOSPalette.surface)
+    }
+
+    @ViewBuilder
+    private func productRow(_ product: Product?, which: VolarProduct) -> some View {
+        HStack {
+            rowTitle(product?.displayName ?? (which == .monthly ? "Monthly" : "Yearly"))
+            Spacer()
+            if let product {
+                Button(product.displayPrice) { appState.purchase(which) }
+                    .font(IOSFont.rowTitle)
+                    .foregroundStyle(IOSPalette.mint)
+                    .disabled(appState.accountBusy)
+            } else {
+                meta("Unavailable", color: IOSPalette.fg3)
+            }
+        }
+        .frame(minHeight: IOSLayout.minTouch)
+    }
+
+    // MARK: - Appearance
 
     private var appearanceSection: some View {
         Section {
             accentSwatchRow
-                .padding(.vertical, IOSMetrics.rowPadY(appState.density))
 
-            // `Density` (Theme.swift) is directly `Hashable` (unlike `SpeechEngineChoice`/
-            // `ParseEnginePreference` below), so this binds straight to the enum — no rawValue
-            // string workaround needed. It has no `CaseIterable` conformance though, so the 3
-            // cases are spelled out explicitly (matches `SettingsView.swift`'s own `Segmented`
-            // option list).
             Picker("Density", selection: Binding(
                 get: { appState.density },
                 set: { appState.setDensity($0) }
@@ -458,15 +442,9 @@ struct SettingsIOSView: View {
                 Text("Roomy").tag(Density.roomy)
             }
             .pickerStyle(.segmented)
-            .frame(minHeight: IOSMetrics.minTouch)
+            .frame(minHeight: IOSLayout.minTouch)
 
-            // `GlassLevel` is also directly `Hashable` but has no persisting setter on `AppState`
-            // (unlike `accent`/`density`/`ambient`, which all have `setAccent`/`setDensity`/
-            // `setAmbient`) — it's a plain `var`. Binding directly to it works at runtime but the
-            // choice is NOT persisted to UserDefaults (no call site anywhere writes one for
-            // `glass`), so it silently resets to `.standard` on next launch. Flagged in the final
-            // report's "missing AppState API" note rather than fixed here (told not to add methods
-            // to AppState).
+            // `glass` has no persisting setter on AppState: resets on relaunch (known gap).
             Picker("Glass", selection: Binding(
                 get: { appState.glass },
                 set: { appState.glass = $0 }
@@ -476,7 +454,7 @@ struct SettingsIOSView: View {
                 Text("Heavy").tag(GlassLevel.heavy)
             }
             .pickerStyle(.segmented)
-            .frame(minHeight: IOSMetrics.minTouch)
+            .frame(minHeight: IOSLayout.minTouch)
 
             Picker("Background", selection: Binding(
                 get: { appState.ambient },
@@ -486,26 +464,18 @@ struct SettingsIOSView: View {
                     Text(mode.label).tag(mode)
                 }
             }
+            .font(IOSFont.rowTitle)
             .pickerStyle(.menu)
-            .frame(minHeight: IOSMetrics.minTouch)
+            .frame(minHeight: IOSLayout.minTouch)
         } header: {
-            sectionHeader("Appearance")
+            SectionLabel("Appearance")
         } footer: {
-            footerText("Volar is dark-only. A custom background photo isn't available on iPhone yet — the desktop picker relies on macOS-only APIs (NSOpenPanel/security-scoped bookmarks); pick a live scene instead.")
+            footer("Volar is dark-only. A custom background photo isn't available on iPhone yet — the desktop picker relies on macOS-only APIs (NSOpenPanel/security-scoped bookmarks); pick a live scene instead.")
         }
-        .listRowBackground(VolarColor.card)
+        .listRowBackground(IOSPalette.surface)
     }
 
-    /// `VolarAccent` is directly `Equatable` (Theme.swift), so this compares with `==` rather than
-    /// via `rawValue` — unlike `SettingsView.swift`'s own comment on this exact row, which claims
-    /// `VolarAccent` "doesn't declare Equatable." That comment appears stale against the actual
-    /// current `Theme.swift` (which this task was told not to touch); either binding form compiles,
-    /// this one is just more direct.
-    ///
-    /// The selection ring uses `VolarColor.textPri` rather than macOS's literal `Color.white`
-    /// (`SettingsView.swift`'s equivalent row) — this file's frozen design contract says colors
-    /// come ONLY from `VolarColor`/accent/`IOSMetrics`, so a raw system `Color.white` is avoided
-    /// even though it renders effectively the same (`textPri` is `#EDF2F9`, near-white).
+    /// Swatches render each `VolarAccent`'s own colour (that is the point of the picker).
     private var accentSwatchRow: some View {
         HStack(spacing: 14) {
             ForEach(VolarAccent.allCases) { candidate in
@@ -516,24 +486,16 @@ struct SettingsIOSView: View {
                     Circle()
                         .fill(candidate.accent.solid)
                         .frame(width: 28, height: 28)
-                        .overlay(
-                            Circle().stroke(selected ? VolarColor.textPri : VolarColor.veil(0.2), lineWidth: selected ? 2 : 0.5)
-                        )
+                        .overlay(Circle().stroke(selected ? IOSPalette.fg : IOSPalette.border, lineWidth: selected ? 2 : 1))
                 }
-                .frame(width: IOSMetrics.minTouch, height: IOSMetrics.minTouch)
+                .buttonStyle(.plain)
+                .frame(width: IOSLayout.minTouch, height: IOSLayout.minTouch)
                 .contentShape(Rectangle())
             }
         }
     }
 
-    // MARK: - 4. Voice
-    // Ported from `SettingsView.swift`'s `generalTab` speech/parsing rows + `notificationsTab`'s
-    // voice-delivery row. Per plan.md §0.1(D): iOS defaults to `.appleOnDevice`; picking WhisperKit
-    // is gated behind a one-time confirmation (`pendingWhisperKitConfirm`) that states the ~145MB
-    // download size and recommends Wi-Fi. That confirmation is a UI-level warning ONLY — it does
-    // NOT check the actual connection type (no `NWPathMonitor`/cellular-vs-Wi-Fi gating here); real
-    // download gating is explicitly a later task per the brief, and `AppState.setSpeechEngine`
-    // itself has no such gate either (it just calls `whisper.prepare()` unconditionally).
+    // MARK: - Voice
 
     private var speechLocales: [(id: String, name: String)] {
         SFSpeechRecognizer.supportedLocales()
@@ -552,9 +514,7 @@ struct SettingsIOSView: View {
 
     private var voiceSection: some View {
         Section {
-            // `SpeechEngineChoice` does NOT declare `Hashable` (only `Sendable, Equatable,
-            // CaseIterable, Identifiable`) — same as `SettingsView.swift`'s own generalTab picker —
-            // so this binds through the `String` rawValue instead of the enum itself.
+            // `SpeechEngineChoice` isn't Hashable, so bind through its rawValue.
             Picker("Speech engine", selection: Binding(
                 get: { appState.speechEngineChoice.rawValue },
                 set: { newRaw in
@@ -570,18 +530,19 @@ struct SettingsIOSView: View {
                     Text(choice.label).tag(choice.rawValue)
                 }
             }
+            .font(IOSFont.rowTitle)
             .pickerStyle(.menu)
-            .frame(minHeight: IOSMetrics.minTouch)
+            .frame(minHeight: IOSLayout.minTouch)
 
             if appState.speechEngineChoice == .whisperKit {
                 HStack {
-                    Text("WhisperKit model").font(IOSMetrics.rowTitle).foregroundStyle(VolarColor.textPri)
+                    rowTitle("WhisperKit model")
                     Spacer()
-                    Text(whisperKitStatusText).font(IOSMetrics.caption).foregroundStyle(VolarColor.textSec)
+                    meta(whisperKitStatusText)
                 }
             }
             if appState.speechEngineChoice == .groq, !GroqEngine.isConfigured {
-                footerText("Groq cloud transcription needs Volar Pro — sign in and upgrade above. Until then Volar uses Apple on-device recognition.")
+                footer("Groq cloud transcription needs Volar Pro — sign in and upgrade above. Until then Volar uses Apple on-device recognition.")
             }
 
             Picker("Recognition language", selection: Binding(
@@ -593,23 +554,18 @@ struct SettingsIOSView: View {
                     Text(loc.name).tag(loc.id)
                 }
             }
+            .font(IOSFont.rowTitle)
             .pickerStyle(.navigationLink)
-            .frame(minHeight: IOSMetrics.minTouch)
+            .frame(minHeight: IOSLayout.minTouch)
 
+            // `voiceFeedback` has no persistence on AppState: works live, resets on relaunch.
             Toggle(isOn: Binding(
                 get: { appState.voiceFeedback },
-                // `voiceFeedback` is a plain `var` with no dedicated setter/persistence on
-                // AppState (unlike `accent`/`density`/`ambient`) — same caveat as `glass` above:
-                // binds and works live, but does not survive relaunch.
                 set: { appState.voiceFeedback = $0 }
-            )) {
-                Text("Voice feedback").font(IOSMetrics.rowTitle).foregroundStyle(VolarColor.textPri)
-            }
-            .tint(accentColors.solid)
-            .frame(minHeight: IOSMetrics.minTouch)
+            )) { rowTitle("Voice feedback") }
+                .tint(IOSPalette.mint)
+                .frame(minHeight: IOSLayout.minTouch)
 
-            // `VoiceDeliveryMode` IS directly `Hashable` (Theme-adjacent enum in AppState.swift),
-            // so this binds straight to it, no rawValue workaround needed.
             Picker("Voice delivery", selection: Binding(
                 get: { appState.voiceDeliveryMode },
                 set: { appState.setVoiceDeliveryMode($0) }
@@ -619,124 +575,65 @@ struct SettingsIOSView: View {
                 }
             }
             .pickerStyle(.segmented)
-            .frame(minHeight: IOSMetrics.minTouch)
+            .frame(minHeight: IOSLayout.minTouch)
         } header: {
-            sectionHeader("Voice")
+            SectionLabel("Voice")
         } footer: {
-            footerText("Apple on-device is the default on iPhone — private, free, no download. WhisperKit is optional and downloads a model file first (see the warning when you pick it). Groq is cloud and needs Volar Pro.")
+            footer("Apple on-device is the default on iPhone — private, free, no download. WhisperKit is optional and downloads a model file first (see the warning when you pick it). Groq is cloud and needs Volar Pro.")
         }
-        .listRowBackground(VolarColor.card)
+        .listRowBackground(IOSPalette.surface)
     }
 
-    // MARK: - 5. Privacy
-    // Ported from `SettingsView.swift`'s server-recognition consent (`pendingServerConsent` /
-    // `allowServerRecognition`) and cloud-parse consent (`cloudParseConsent` / `parseEnginePreference`).
+    // MARK: - Privacy (server recognition; cloud parsing toggle lives under Capture)
 
     private var privacySection: some View {
         Section {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Server-based recognition").font(IOSMetrics.rowTitle).foregroundStyle(VolarColor.textPri)
-                    Text("Off by default — Volar recognizes speech on-device only. Turning this on lets Apple's servers transcribe when on-device recognition isn't available; audio then leaves this iPhone.")
-                        .font(IOSMetrics.caption)
-                        .foregroundStyle(VolarColor.textSec)
+                    rowTitle("Server-based recognition")
+                    meta("Off by default — Volar recognizes speech on-device only. Turning this on lets Apple's servers transcribe when on-device recognition isn't available; audio then leaves this iPhone.")
                 }
                 Spacer(minLength: 8)
-                // `allowServerRecognition` is `private(set)` on AppState — the ONLY way to flip it
-                // is `useServerRecognition()`, which per its doc comment ALSO immediately calls
-                // `startCapture()` (it's designed to be invoked from the in-flow consent prompt,
-                // not a passive Settings switch). There is no public method to turn it back off.
-                // Surfaced here as best-effort: tapping "Enable" starts a capture as a side effect
-                // — a real UX wrinkle this file cannot fix without a new AppState method (flagged
-                // in the final report rather than added, per the task's hard rule).
+                // `allowServerRecognition` is private(set); the only way to flip it is
+                // `useServerRecognition()`, which also starts a capture (no way back to off).
                 if appState.allowServerRecognition {
-                    Text("On").font(IOSMetrics.caption).foregroundStyle(VolarColor.textSec)
+                    meta("On")
                 } else {
                     Button("Enable") { appState.useServerRecognition() }
-                        .font(IOSMetrics.caption)
-                        .foregroundStyle(accentColors.solid)
+                        .font(IOSFont.meta)
+                        .foregroundStyle(IOSPalette.mint)
+                        .frame(minHeight: IOSLayout.minTouch)
                 }
             }
-            .frame(minHeight: IOSMetrics.minTouch)
-
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Cloud task parsing").font(IOSMetrics.rowTitle).foregroundStyle(VolarColor.textPri)
-                    Text("On-device stays private and free. Cloud AI sends only the TEXT of what you said — never audio — to our proxy for higher-quality parsing of trickier phrasing.")
-                        .font(IOSMetrics.caption)
-                        .foregroundStyle(VolarColor.textSec)
-                }
-                Spacer(minLength: 8)
-                Toggle("", isOn: Binding(
-                    get: { appState.parseEnginePreference == .cloud },
-                    set: { appState.setParseEngine($0 ? .cloud : .onDevice) }
-                ))
-                .labelsHidden()
-                .tint(accentColors.solid)
-            }
-            .frame(minHeight: IOSMetrics.minTouch)
-
-            if appState.parseEnginePreference == .cloud, !ConfigParseCredentialProvider.isConfigured {
-                footerText("Sign in above to enable cloud parsing — every signed-in account gets a daily quota, free or Pro. Until you sign in, Volar quietly uses on-device parsing.")
-            }
+            .frame(minHeight: IOSLayout.minTouch)
         } header: {
-            sectionHeader("Privacy")
+            SectionLabel("Privacy")
         } footer: {
-            footerText("Volar's core (capture, tasks, reminders, focus) always works fully offline. These two switches only affect optional cloud features.")
+            footer("Volar's core (capture, tasks, reminders, focus) always works fully offline. These switches only affect optional cloud features.")
         }
-        .listRowBackground(VolarColor.card)
+        .listRowBackground(IOSPalette.surface)
     }
 
-    // MARK: - 6. About
-    // Ported from `SettingsView.swift`'s `aboutTab`. That tab's "What's new"/"Acknowledgements"
-    // pills are inert `Text` capsules on macOS too (no destination wired there either) — this repo
-    // has no real Privacy Policy / Terms of Service URL anywhere (checked: no `https://` hit for
-    // either in `docs/` or `Shared/`/`Volar/`), so rather than fabricate a placeholder domain that
-    // would 404 in production, this section leaves those two as the same inert labels macOS has and
-    // flags the gap below instead of inventing a URL.
+    // MARK: - About
 
     private var aboutSection: some View {
         Section {
             HStack {
-                Text("Version").font(IOSMetrics.rowTitle).foregroundStyle(VolarColor.textPri)
+                rowTitle("Version")
                 Spacer()
-                Text(appVersionString).font(IOSMetrics.caption).foregroundStyle(VolarColor.textSec)
+                Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
+                    .font(IOSFont.mono(13))
+                    .foregroundStyle(IOSPalette.fg2)
             }
-            Text("Voice-first task manager for iPhone.")
-                .font(IOSMetrics.caption)
-                .foregroundStyle(VolarColor.textSec)
-            HStack(spacing: 8) {
-                Text("What's new")
-                    .font(IOSMetrics.caption)
-                    .foregroundStyle(accentColors.solid)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(accentColors.surface)
-                    .clipShape(Capsule())
-                Text("Acknowledgements")
-                    .font(IOSMetrics.caption)
-                    .foregroundStyle(VolarColor.textSec)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(VolarColor.veil(0.06))
-                    .clipShape(Capsule())
-            }
+            .frame(minHeight: IOSLayout.minTouch)
         } header: {
-            sectionHeader("About")
-        } footer: {
-            footerText("No Privacy Policy / Terms of Service URL exists in this repo yet — add one (docs/app-store-privacy.md is the closest existing doc) before wiring a real Link here.")
+            SectionLabel("About")
         }
-        .listRowBackground(VolarColor.card)
-    }
-
-    private var appVersionString: String {
-        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String
-        return build.map { "\(short) (\($0))" } ?? short
+        .listRowBackground(IOSPalette.surface)
     }
 }
 
 #Preview {
-    SettingsIOSView()
+    NavigationStack { SettingsIOSView() }
         .environment(AppState())
 }

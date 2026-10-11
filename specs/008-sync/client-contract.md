@@ -521,3 +521,16 @@ không đụng database production · không gỡ `@Attribute(.unique)`.
 **Ngoại lệ duy nhất Opus thêm vào:** phải có **một đường xem `sync_rejects`** (group C). Một bảng
 giữ bản thua mà người dùng không mở được thì chẳng khác gì đã mất — mà cả thiết kế này dựng lên
 quanh lời hứa "không bao giờ nuốt mất việc".
+
+---
+
+## 10. Rewards stream (011-ios-companion, 2026-10-11)
+
+`sync_exchange` gains a THIRD stream, mirroring tasks (LWW via `SyncMerge.decide`, no `sync_rejects` row):
+
+- Request: `p_cursor_rewards` (opaque string, same rules as §6) and `p_rewards`: `[{ id, updatedAt, deletedAt?, payload, schemaVersion: 1 }]`; `payload` is the `RewardItem` JSON (catalog and grant rows share one table, `kind` tells them apart).
+- Response: `cursorRewards` and `rewards: [{ id, updatedAt, deletedAt, payload, schemaVersion, serverUpdatedAt, originDevice }]`. A response WITHOUT these keys (older server) decodes as `cursorRewards == nil`, `rewards == []`.
+- Client: `SyncRewardStoring` (`SyncContracts.swift`) is implemented by `TaskStore`; `SyncEngine` applies rewards in the SAME `do` block as tasks (disk before cursor, §4b), stores the cursor under `volar.sync.cursorRewards` (cleared by `resyncFromScratch`), and guards it with the same `cursorEpoch`.
+- After a round applied >= 1 task or reward the engine posts `Notification.Name.volarSyncDidApplyRemote` with `userInfo: ["taskIds": [UUID], "rewardIds": [UUID]]`.
+- `volar_sync_purge` may return an extra rewards count; the client ignores unknown keys.
+- `SyncEngine.deviceId` is internal (RewardCenter stamps `startedDevice`).

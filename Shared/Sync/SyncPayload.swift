@@ -394,6 +394,56 @@ extension SyncTaskInbound: Decodable {
     }
 }
 
+/// One entry of `p_rewards` (011 contract §5). Same shape as `SyncTaskOutbound`; payload is `RewardItem`.
+struct SyncRewardOutbound: Sendable, Encodable {
+    var id: UUID
+    var updatedAt: Date
+    var deletedAt: Date?
+    var payload: RewardItem
+    var schemaVersion: Int
+
+    init(_ pending: PendingReward) {
+        id = pending.item.id
+        updatedAt = pending.updatedAt
+        deletedAt = pending.deletedAt
+        payload = pending.item
+        schemaVersion = 1
+    }
+}
+
+/// One entry of `rewards[]` in the response. Payload decoded independently (`try?`) so a bad payload
+/// still yields a wrapper a tombstone can use — same reasoning as `SyncTaskInbound`.
+struct SyncRewardInbound: Sendable {
+    var id: UUID
+    var updatedAt: Date
+    var deletedAt: Date?
+    var payload: RewardItem?
+    var schemaVersion: Int
+    var serverUpdatedAt: Date
+    var originDevice: String?
+
+    var asRemoteReward: RemoteReward {
+        RemoteReward(id: id, updatedAt: updatedAt, deletedAt: deletedAt, item: payload)
+    }
+}
+
+extension SyncRewardInbound: Decodable {
+    private enum CodingKeys: String, CodingKey {
+        case id, updatedAt, deletedAt, payload, schemaVersion, serverUpdatedAt, originDevice
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
+        payload = try? container.decode(RewardItem.self, forKey: .payload)
+        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        serverUpdatedAt = try container.decode(Date.self, forKey: .serverUpdatedAt)
+        originDevice = try container.decodeIfPresent(String.self, forKey: .originDevice)
+    }
+}
+
 /// One entry of `p_completions` in the outbound request.
 struct SyncCompletionOutbound: Sendable, Encodable {
     var id: UUID
@@ -446,6 +496,9 @@ struct SyncExchangeRequest: Sendable, Encodable {
     var deviceLabel: String?
     var tasks: [SyncTaskOutbound]
     var completions: [SyncCompletionOutbound]
+    /// Third stream (011 contract §5). Defaulted so existing call sites compile unchanged.
+    var cursorRewards: String? = nil
+    var rewards: [SyncRewardOutbound] = []
     var limit: Int
 
     private enum CodingKeys: String, CodingKey {
@@ -455,6 +508,8 @@ struct SyncExchangeRequest: Sendable, Encodable {
         case deviceLabel = "p_device_label"
         case tasks = "p_tasks"
         case completions = "p_completions"
+        case cursorRewards = "p_cursor_rewards"
+        case rewards = "p_rewards"
         case limit = "p_limit"
     }
 }
@@ -470,6 +525,9 @@ struct SyncExchangeResponse: Sendable {
     var cursorCompletions: String?
     var tasks: [SyncTaskInbound]
     var completions: [SyncCompletionInbound]
+    /// Absent from an OLD server's response -> `nil` / `[]` (defaults keep old call sites compiling).
+    var cursorRewards: String? = nil
+    var rewards: [SyncRewardInbound] = []
     var hasMore: Bool
     /// Task ids the client pushed that LOST an LWW conflict (contract §3.1) — the server already
     /// filed the losing payload in `sync_rejects`; this list just tells the client "the version you
@@ -494,6 +552,7 @@ extension SyncExchangeResponse {
         let decoder = SyncCoding.makeDecoder()
         let tasks: [SyncTaskInbound] = Self.lenientDecode(root["tasks"] as? [Any], using: decoder)
         let completions: [SyncCompletionInbound] = Self.lenientDecode(root["completions"] as? [Any], using: decoder)
+        let rewards: [SyncRewardInbound] = Self.lenientDecode(root["rewards"] as? [Any], using: decoder)
         let rejected = (root["rejected"] as? [String])?.compactMap(UUID.init) ?? []
 
         return SyncExchangeResponse(
@@ -501,6 +560,8 @@ extension SyncExchangeResponse {
             cursorCompletions: root["cursorCompletions"] as? String,
             tasks: tasks,
             completions: completions,
+            cursorRewards: root["cursorRewards"] as? String,
+            rewards: rewards,
             hasMore: root["hasMore"] as? Bool ?? false,
             rejected: rejected
         )

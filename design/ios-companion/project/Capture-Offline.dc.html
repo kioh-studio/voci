@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Capture — offline</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#66D4CF}a:hover{color:#8FE3DF}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; position: relative; overflow: hidden; background: #0E0F11; color: #F2F2F7; font-family: 'Geist', -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <div style="position: absolute; top: 59px; left: 22px; right: 22px; display: flex; align-items: baseline; gap: 10px">
+    <span style="font-size: 30px; font-weight: 600; letter-spacing: -0.02em">Now</span>
+    <span style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 13px; color: #74787E">Sat, Oct 4</span>
+  </div>
+
+  <div style="position: absolute; top: 112px; left: 22px; right: 22px; display: flex; align-items: center; gap: 10px; background: #131417; border: 1px solid rgba(255,255,255,0.10); border-radius: 12px; padding: 10px 12px; box-sizing: border-box; color: #A0A4AA">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex: none"><path d="M7 18h10a4 4 0 001.5-7.7A6 6 0 008 8.6"></path><path d="M3 3l18 18"></path></svg>
+    <span style="font-size: 13px; color: #A0A4AA">Offline — what you say is saved word for word.</span>
+  </div>
+
+  <div style="position: absolute; top: 190px; left: 22px; right: 22px; display: flex; flex-direction: column; gap: 16px">
+    <span style="align-self: flex-start; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 11px; font-weight: 600; letter-spacing: .1em; color: #06201F; background: #66D4CF; border-radius: 999px; padding: 4px 11px">NOW</span>
+    <div style="font-size: 30px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.14; text-shadow: 0 0 30px rgba(102,212,207,0.30)">Fix the auth token refresh</div>
+    <div style="display: flex; gap: 8px; flex-wrap: wrap">
+      <span style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 13px; padding: 5px 10px; border-radius: 8px; background: #131417; border: 1px solid rgba(255,255,255,0.10); color: #A0A4AA; display: inline-flex; align-items: center; gap: 6px"><span style="width: 6px; height: 6px; border-radius: 3px; background: #FF9F6B"></span>High</span>
+      <span style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 13px; padding: 5px 10px; border-radius: 8px; background: #131417; border: 1px solid rgba(255,255,255,0.10); color: #D9B77A">17:00</span>
+      <span style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 13px; padding: 5px 10px; border-radius: 8px; background: #131417; border: 1px solid rgba(255,255,255,0.10); color: #A0A4AA">45m</span>
+    </div>
+    <div style="display: flex; gap: 10px; margin-top: 8px">
+      <button style="flex: 1; height: 52px; border: none; border-radius: 14px; background: linear-gradient(180deg,#8FE3DF,#66D4CF); color: #06201F; font-family: inherit; font-size: 16px; font-weight: 600">Start focus</button>
+      <button style="width: 120px; height: 52px; border-radius: 14px; background: #2C2C2E; border: 1px solid rgba(255,255,255,0.18); color: #F2F2F7; font-family: inherit; font-size: 16px; font-weight: 500">Done</button>
+    </div>
+  </div>
+
+  <div style="position: absolute; top: 604px; left: 22px; right: 22px; background: #2C2C2E; border-radius: 14px; padding: 12px 14px; box-sizing: border-box; display: flex; flex-direction: column; gap: 4px">
+    <div style="display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 500">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#30D158" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"></path></svg>
+      <span>Saved. Nothing lost.</span>
+    </div>
+    <div style="font-size: 13px; color: #A0A4AA; padding-left: 26px">Volar will tidy it up when you're back online.</div>
+  </div>
+
+  <button aria-label="Add task by voice" style="position: absolute; left: 163px; bottom: 96px; width: 64px; height: 64px; border-radius: 32px; border: none; background: #66D4CF; color: #06201F; box-shadow: 0 8px 24px rgba(102,212,207,0.30); display: flex; align-items: center; justify-content: center; padding: 0">
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0014 0"></path><path d="M12 18v3"></path></svg>
+  </button>
+
+  <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 83px; background: rgba(14,15,17,0.92); border-top: 1px solid rgba(255,255,255,0.10); box-sizing: border-box; display: flex">
+    <button style="flex: 1; height: 49px; background: none; border: none; padding: 0; color: #66D4CF; font-family: inherit; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="4"></circle></svg>
+      <span style="font-size: 10px; font-weight: 500">Now</span>
+    </button>
+    <button style="flex: 1; height: 49px; background: none; border: none; padding: 0; color: #74787E; font-family: inherit; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4"></path><path d="M5 4h11l-2 4 2 4H5"></path></svg>
+      <span style="font-size: 10px; font-weight: 500">Goals</span>
+    </button>
+    <button style="flex: 1; height: 49px; background: none; border: none; padding: 0; color: #74787E; font-family: inherit; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"></rect><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"></rect><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"></rect><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"></rect></svg>
+      <span style="font-size: 10px; font-weight: 500">Views</span>
+    </button>
+  </div>
+  <div style="position: absolute; left: 128px; bottom: 8px; width: 134px; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.6)"></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

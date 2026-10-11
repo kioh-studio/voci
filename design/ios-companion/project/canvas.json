@@ -1,0 +1,196 @@
+{
+  "v": 3,
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-10-04T12:00:00Z"
+  },
+  "title": "Volar iOS Companion",
+  "launch": {
+    "view": "canvas"
+  },
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Now"
+    },
+    "Capture-Listening.dc.html": {
+      "x": 470,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Capture — listening"
+    },
+    "Capture-Confirm.dc.html": {
+      "x": 940,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Capture — confirm"
+    },
+    "Task-Detail.dc.html": {
+      "x": 1410,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Task detail — edit"
+    },
+    "Now-Empty.dc.html": {
+      "x": 1880,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Now — nothing on your plate"
+    },
+    "Goals.dc.html": {
+      "x": 0,
+      "y": 1264,
+      "w": 390,
+      "h": 844,
+      "title": "Goal rewards"
+    },
+    "Reward-Picker.dc.html": {
+      "x": 470,
+      "y": 1264,
+      "w": 390,
+      "h": 844,
+      "title": "Attach a reward"
+    },
+    "Reward-New.dc.html": {
+      "x": 940,
+      "y": 1264,
+      "w": 390,
+      "h": 844,
+      "title": "New reward"
+    },
+    "Reward-Unlocked.dc.html": {
+      "x": 1410,
+      "y": 1264,
+      "w": 390,
+      "h": 844,
+      "title": "Reward earned"
+    },
+    "Break-Running.dc.html": {
+      "x": 1880,
+      "y": 1264,
+      "w": 390,
+      "h": 844,
+      "title": "Break running"
+    },
+    "LockScreen-Break.dc.html": {
+      "x": 2350,
+      "y": 1264,
+      "w": 390,
+      "h": 844,
+      "title": "Lock Screen — break timer"
+    },
+    "LockScreen-Reminder.dc.html": {
+      "x": 0,
+      "y": 2528,
+      "w": 390,
+      "h": 844,
+      "title": "Lock Screen — reminders"
+    },
+    "HomeScreen-Widgets.dc.html": {
+      "x": 470,
+      "y": 2528,
+      "w": 390,
+      "h": 844,
+      "title": "Home Screen — widgets"
+    },
+    "Share-Extension.dc.html": {
+      "x": 940,
+      "y": 2528,
+      "w": 390,
+      "h": 844,
+      "title": "Share to Volar"
+    },
+    "Capture-Offline.dc.html": {
+      "x": 1410,
+      "y": 2528,
+      "w": 390,
+      "h": 844,
+      "title": "Capture — offline"
+    },
+    "Reparse-Review.dc.html": {
+      "x": 1880,
+      "y": 2528,
+      "w": 390,
+      "h": 844,
+      "title": "Back online — review"
+    },
+    "Views.dc.html": {
+      "x": 0,
+      "y": 3792,
+      "w": 390,
+      "h": 844,
+      "title": "Views — add a view"
+    },
+    "Settings.dc.html": {
+      "x": 470,
+      "y": 3792,
+      "w": 390,
+      "h": 844,
+      "title": "Settings"
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "Capture-Listening.dc.html",
+    "Capture-Confirm.dc.html",
+    "Task-Detail.dc.html",
+    "Now-Empty.dc.html",
+    "Goals.dc.html",
+    "Reward-Picker.dc.html",
+    "Reward-New.dc.html",
+    "Reward-Unlocked.dc.html",
+    "Break-Running.dc.html",
+    "LockScreen-Break.dc.html",
+    "LockScreen-Reminder.dc.html",
+    "HomeScreen-Widgets.dc.html",
+    "Share-Extension.dc.html",
+    "Capture-Offline.dc.html",
+    "Reparse-Review.dc.html",
+    "Views.dc.html",
+    "Settings.dc.html"
+  ],
+  "notes": {
+    "row1": {
+      "x": 0,
+      "y": -300,
+      "text": "1 · Now — one task, capture, confirm, edit",
+      "kind": "title1",
+      "maxW": 2270,
+      "w": 240
+    },
+    "row2": {
+      "x": 0,
+      "y": 964,
+      "text": "2 · Goal rewards — set it, earn it, time it",
+      "kind": "title1",
+      "maxW": 2740,
+      "w": 240
+    },
+    "row3": {
+      "x": 0,
+      "y": 2228,
+      "text": "3 · Away from the app — reminders, widgets, share, offline",
+      "kind": "title1",
+      "maxW": 2270,
+      "w": 240
+    },
+    "row4": {
+      "x": 0,
+      "y": 3492,
+      "text": "4 · Views & settings",
+      "kind": "title1",
+      "maxW": 860,
+      "w": 240
+    }
+  },
+  "designSystems": [],
+  "attachments": {}
+}

@@ -87,6 +87,8 @@ actor SyncAccountClient {
         struct PurgeResult: Decodable {
             let deletedTasks: Int
             let deletedCompletions: Int
+            // Optional; unknown keys are ignored by synthesis, so a newer server may add reward counts.
+            let deletedRewards: Int?
         }
         guard let result = try? JSONDecoder().decode(PurgeResult.self, from: data) else {
             throw SyncFailure.server(status: 200, message: "purge response undecodable")

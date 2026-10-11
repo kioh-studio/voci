@@ -53,7 +53,8 @@ enum TaskStoreError: Error, LocalizedError, Equatable {
 @MainActor
 final class TaskStore {
     private let container: ModelContainer
-    private let context: ModelContext
+    // Internal (not private): the `RewardStore.swift` extension needs it.
+    let context: ModelContext
 
     /// Validation rule 6.
     static let maxBatchSize = 10
@@ -66,7 +67,7 @@ final class TaskStore {
     private static let unbackfilledSyncEpoch = Date(timeIntervalSince1970: 0)
 
     init() throws {
-        let schema = Schema([VolarTask.self, CompletionEvent.self, ParseCorrection.self])
+        let schema = Schema([VolarTask.self, CompletionEvent.self, ParseCorrection.self, RewardRecord.self])
         let configuration = ModelConfiguration(schema: schema)
         container = try ModelContainer(for: schema, configurations: [configuration])
         context = ModelContext(container)
@@ -77,7 +78,7 @@ final class TaskStore {
     /// store across repeated local runs. Functionally identical to `init()` otherwise — same
     /// schema, same validated CRUD surface.
     init(inMemory: Bool) throws {
-        let schema = Schema([VolarTask.self, CompletionEvent.self, ParseCorrection.self])
+        let schema = Schema([VolarTask.self, CompletionEvent.self, ParseCorrection.self, RewardRecord.self])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: inMemory)
         container = try ModelContainer(for: schema, configurations: [configuration])
         context = ModelContext(container)
@@ -709,7 +710,8 @@ final class TaskStore {
     /// rule) and `applyRemote`/`applyRemoteCompletions` below (client-contract.md §4b), which need
     /// to propagate a failed `saveThrowing()` out to the sync engine rather than swallow it.
     /// `suppressStamp` is always returned to `false` via `defer`, including when `body` throws.
-    private func withoutStamping(_ body: () throws -> Void) rethrows {
+    // Internal: used by the `RewardStore.swift` extension.
+    func withoutStamping(_ body: () throws -> Void) rethrows {
         suppressStamp = true
         defer { suppressStamp = false }
         try body()
@@ -735,7 +737,8 @@ final class TaskStore {
     /// screen, and surfacing a flaky-disk error here would only turn a successful user-facing
     /// operation into a crash/error path for no benefit. `saveThrowing()` is the one exception,
     /// reserved for the path that applies data FROM the server (client-contract.md §4b).
-    private func save() {
+    // Internal: used by the `RewardStore.swift` extension.
+    func save() {
         try? saveThrowing()
     }
 
@@ -746,11 +749,13 @@ final class TaskStore {
     /// silent data loss with no crash involved. `markSynced`/`markCompletionsSynced` do NOT use
     /// this (see their doc comments) — losing a confirmation is harmless (just re-pushes once
     /// more), the asymmetric case is losing an APPLY.
-    private func saveThrowing() throws {
+    // Internal: used by the `RewardStore.swift` extension.
+    func saveThrowing() throws {
         if !suppressStamp {
             let stamp = Date()
             for model in context.insertedModelsArray + context.changedModelsArray {
                 (model as? VolarTask)?.updatedAt = stamp
+                (model as? RewardRecord)?.updatedAt = stamp
             }
         }
         try context.save()

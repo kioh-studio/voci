@@ -144,3 +144,41 @@ protocol SyncTaskStoring: AnyObject {
     @discardableResult
     func applyRemoteCompletions(_ remote: [RemoteCompletion]) throws -> Int
 }
+
+// MARK: - Rewards stream (011-ios-companion implementation-contract §5)
+// UNVERIFIED: written on Windows, never compiled. Mirrors the task stream above.
+
+/// One local reward row (catalog or grant) waiting to be pushed. Built by C1's `TaskStore` conformance.
+struct PendingReward: Sendable {
+    var item: RewardItem
+    var updatedAt: Date
+    /// Non-nil = tombstone; payload still sent in full.
+    var deletedAt: Date?
+}
+
+/// One remote reward row to apply. `item == nil` only when the payload was unreadable; a tombstone
+/// with a nil item is still applicable.
+struct RemoteReward: Sendable {
+    var id: UUID
+    var updatedAt: Date
+    var deletedAt: Date?
+    var item: RewardItem?
+}
+
+/// Same shape as `SyncTaskStoring`, for rewards. `TaskStore` conforms in `RewardStore.swift` (C1).
+@MainActor
+protocol SyncRewardStoring: AnyObject {
+    /// Rows with `isPendingSync == true`, oldest `updatedAt` first, capped at `limit`. Includes tombstones.
+    func pendingRewardsForSync(limit: Int) -> [PendingReward]
+    /// Sets `syncedAt = confirmed updatedAt` per id; a row edited meanwhile stays pending.
+    func markRewardsSynced(_ confirmations: [UUID: Date])
+    /// LWW via `SyncMerge.decide`, without stamping `updatedAt`. THROWS on a failed disk write; the
+    /// caller must not advance the cursor then (client-contract §4b). Returns ids actually written.
+    @discardableResult func applyRemoteRewards(_ remote: [RemoteReward]) throws -> [UUID]
+}
+
+extension Notification.Name {
+    /// Posted by `SyncEngine` after a round applied at least one remote task or reward.
+    /// userInfo: `["taskIds": [UUID], "rewardIds": [UUID]]`.
+    static let volarSyncDidApplyRemote = Notification.Name("volar.sync.didApplyRemote")
+}

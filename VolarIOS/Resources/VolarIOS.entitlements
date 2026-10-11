@@ -12,6 +12,9 @@
 	<array>
 		<string>Default</string>
 	</array>
+	<!-- 011: lets due-now / due-in-an-hour reminders use .timeSensitive (user can turn it off in Settings). -->
+	<key>com.apple.developer.usernotifications.time-sensitive</key>
+	<true/>
 	<!--
 	  Deliberately NOT included above (do not add without re-reading plan.md §7.2 first):
 

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lock Screen — break timer</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#66D4CF}a:hover{color:#8FE3DF}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; position: relative; overflow: hidden; background: linear-gradient(180deg,#0E1A1F,#0E0F11); color: #F2F2F7; font-family: 'Geist', -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <div style="position: absolute; left: 95px; top: 11px; width: 200px; height: 37px; border-radius: 20px; background: #000; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; box-sizing: border-box">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#66D4CF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="11" rx="5.5"></rect><path d="M7 10.5v4M5 12.5h4"></path><path d="M16 11.5h.01M18 14h.01"></path></svg>
+    <span style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 13px; color: #66D4CF; font-variant-numeric: tabular-nums">18:42</span>
+  </div>
+
+  <div style="position: absolute; left: 0; right: 0; top: 84px; text-align: center; font-size: 19px; font-weight: 500; color: rgba(242,242,247,0.85)">Saturday, October 4</div>
+  <div style="position: absolute; left: 0; right: 0; top: 112px; text-align: center; font-size: 92px; font-weight: 600; line-height: 1; letter-spacing: -0.02em; color: #F2F2F7">14:22</div>
+
+  <div style="position: absolute; left: 14px; top: 540px; width: 362px; box-sizing: border-box; padding: 16px; border-radius: 24px; background: rgba(28,28,30,0.82); display: flex; flex-direction: column; gap: 14px">
+    <div style="display: flex; align-items: center; gap: 12px">
+      <div style="width: 44px; height: 44px; border-radius: 50%; background: rgba(102,212,207,0.14); color: #66D4CF; display: flex; align-items: center; justify-content: center; flex: none">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="11" rx="5.5"></rect><path d="M7 10.5v4M5 12.5h4"></path><path d="M16 11.5h.01M18 14h.01"></path></svg>
+      </div>
+      <div style="flex: 1; display: flex; flex-direction: column; gap: 2px">
+        <span style="font-size: 15px; font-weight: 600">Break · Game</span>
+        <span style="font-size: 13px; color: #A0A4AA">Back to Now at 14:41</span>
+      </div>
+      <span style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 26px; color: #66D4CF; font-variant-numeric: tabular-nums">18:42</span>
+    </div>
+    <div style="height: 4px; border-radius: 2px; background: rgba(255,255,255,0.10); overflow: hidden">
+      <div style="width: 38%; height: 4px; border-radius: 2px; background: #66D4CF"></div>
+    </div>
+  </div>
+
+  <button aria-label="Flashlight" style="position: absolute; left: 46px; top: 735px; width: 50px; height: 50px; border-radius: 50%; border: 0; padding: 0; background: rgba(255,255,255,0.12); color: #F2F2F7; display: flex; align-items: center; justify-content: center; cursor: pointer">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3h8v4l-2 2v12h-4V9L8 7z"></path><path d="M12 12v2"></path></svg>
+  </button>
+  <button aria-label="Camera" style="position: absolute; right: 46px; top: 735px; width: 50px; height: 50px; border-radius: 50%; border: 0; padding: 0; background: rgba(255,255,255,0.12); color: #F2F2F7; display: flex; align-items: center; justify-content: center; cursor: pointer">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"></path><circle cx="12" cy="13" r="3.5"></circle></svg>
+  </button>
+
+  <div style="position: absolute; left: 128px; bottom: 8px; width: 134px; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.6)"></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

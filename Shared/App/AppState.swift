@@ -1151,6 +1151,68 @@ final class AppState {
     let reminderGate: ReminderContextGate
     let scheduler: ReminderScheduler?
 
+    // MARK: - 011 offline capture
+    /// Set by the iOS app shell (feature 011 contract §7). `nil` on macOS, so every hook below is inert there.
+    @ObservationIgnored var offlineCapture: OfflineCaptureCenter?
+    /// Set by the iOS app shell to `RewardCenter.handleRemoteApplied`; called after a remote sync round applied rows.
+    @ObservationIgnored var rewardCenterDidApplyRemote: (() -> Void)?
+    /// Which tier the most recent `router.parse` used (`.titleOnly` = nothing smart ran, e.g. offline).
+    var lastParseRoute: IntentRouter.Route { router.lastRoute }
+
+    /// Thin wrapper for `ReparseReviewSheet` (one cloud call per capture).
+    func reparse(_ transcript: String) async -> [ParsedTask] {
+        await router.parse(transcript, now: clock(), openTaskTitles: openTasks.map(\.title))
+    }
+
+    /// Replaces an offline title-only task with the re-parsed result: first parsed task updates the
+    /// original, the rest become new tasks. Returns false (changes nothing) if the user already
+    /// edited the original's title, or it no longer exists.
+    @discardableResult
+    func applyReparse(taskId: UUID, parsed: [ParsedTask]) -> Bool {
+        guard let first = parsed.first,
+              let original = tasks.first(where: { $0.id == taskId }),
+              let source = original.sourceTranscript,
+              original.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                == source.trimmingCharacters(in: .whitespacesAndNewlines)
+        else { return false }
+        func confident<T>(_ v: ParsedValue<T>?) -> T? { (v?.isUncertain == false) ? v?.value : nil }
+        updateTask(
+            taskId,
+            title: first.title,
+            details: original.details,
+            priority: confident(first.priority).map { Self.uiPriority(from: $0) } ?? original.priority,
+            startTime: original.startTime,
+            deadline: confident(first.deadline) ?? original.deadline,
+            deadlineKind: original.deadlineKind,
+            durationMinutes: confident(first.estimateMinutes) ?? original.durationMinutes,
+            remindPeriod: original.reminderOverride?.remindPeriod
+        )
+        for extra in parsed.dropFirst() {
+            addTask(TaskItem(
+                title: extra.title,
+                details: extra.notes ?? extra.sourceTranscript,
+                priority: Self.uiPriority(from: confident(extra.priority)),
+                deadline: confident(extra.deadline),
+                createdAt: clock(),
+                when: .now,
+                durationMinutes: confident(extra.estimateMinutes),
+                notes: extra.notes,
+                sourceTranscript: extra.sourceTranscript,
+                kind: extra.kind
+            ))
+        }
+        offlineCapture?.remove(taskId)
+        return true
+    }
+
+    /// Called at the end of `confirmSave`'s success paths with the tasks that save created.
+    private func recordOfflineCaptureIfNeeded(_ items: [TaskItem]) {
+        guard lastParseRoute == .titleOnly, offlineCapture?.isOnline == false,
+              let transcript = items.first?.sourceTranscript else { return }
+        offlineCapture?.recordOfflineSave(taskIds: items.map(\.id), transcript: transcript)
+    }
+    // MARK: - end 011 offline capture
+
     /// Route `volar://capture` (`AppLinkHandler`) — `nil` trong nhánh no-store. Tính năng
     /// delegation (route `ai-done`, `DelegationTracker`, `ClaudeCodeConnector`) đã bỏ 2026-08-22,
     /// nhưng app-link vẫn sống vì `volar://capture` không dính gì tới nó.
@@ -4641,6 +4703,7 @@ final class AppState {
             }
             notifyEligibilityAndScheduleResurface(before: before, now: now)
             scheduleRemindersForSavedItems(remindersTargetIDs) // no-op: `scheduler` is nil without a store
+            recordOfflineCaptureIfNeeded(itemsToSave) // 011
             finishSaveUI(titles: savedTitles)
             // FIX 6: membership change (new tasks, possibly with new deadlines).
             syncCalendarMirror()
@@ -4719,6 +4782,7 @@ final class AppState {
             tasks = store.fetchAll()
             notifyEligibilityAndScheduleResurface(before: before, now: now)
             scheduleRemindersForSavedItems(remindersTargetIDs)
+            recordOfflineCaptureIfNeeded(itemsToSave) // 011
             finishSaveUI(titles: savedTitles)
             // FIX 6: membership change (new tasks, possibly with new deadlines) — every chunk
             // committed successfully by this point.
@@ -6182,6 +6246,25 @@ final class AppState {
         // so it never fired; that dead observer has been deleted from `ReminderScheduler.swift`,
         // leaving `VolarApp.swift`'s correct path as the only wake trigger).
         scheduler?.rebuildFromStorage()
+        // MARK: - 011 offline capture: remote sync applied rows -> refresh + re-arm/cancel reminders.
+        // UNVERIFIED: written blind. Not idempotent if activateServices() runs twice (same as other observers here).
+        NotificationCenter.default.addObserver(
+            forName: .volarSyncDidApplyRemote, object: nil, queue: .main
+        ) { @Sendable [weak self] note in
+            let ids = (note.userInfo?["taskIds"] as? [UUID]) ?? []
+            _Concurrency.Task { @MainActor in
+                guard let self else { return }
+                self.refreshFromStore()
+                for id in ids {
+                    if let t = self.tasks.first(where: { $0.id == id }), t.status != .done, t.status != .archived {
+                        self.scheduler?.scheduleReminders(taskId: id)
+                    } else {
+                        self.scheduler?.cancelReminders(taskId: id)
+                    }
+                }
+                self.rewardCenterDidApplyRemote?()
+            }
+        }
         // CB-1: `ReminderScheduler` self-assigns as `UNUserNotificationCenter.current().delegate`
         // inside its own `init` (`ReminderScheduler.swift`) — there is no separate
         // `ReminderNotificationDelegate` type for this file to construct/assign (that symbol was

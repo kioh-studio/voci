@@ -97,6 +97,7 @@ final class SyncEngine {
     private static let deviceIdKey = "volar.sync.deviceId"
     private static let cursorTasksKey = "volar.sync.cursorTasks"
     private static let cursorCompletionsKey = "volar.sync.cursorCompletions"
+    private static let cursorRewardsKey = "volar.sync.cursorRewards"
     private static let lastSuccessAtKey = "volar.sync.lastSuccessAt"
 
     // MARK: - Dependencies
@@ -104,6 +105,7 @@ final class SyncEngine {
     private let client: SyncClient
     private let defaults: UserDefaults
     private weak var store: SyncTaskStoring?
+    private weak var rewardStore: SyncRewardStoring?
 
     // MARK: - Observable state (client-contract.md §8's "Nhóm C đọc" — exactly these three)
 
@@ -136,7 +138,8 @@ final class SyncEngine {
     /// wrapping via `&+` on a pathological number of presses is harmless.
     private var cursorEpoch = 0
 
-    private lazy var deviceId: String = {
+    /// Internal: `RewardCenter` stamps `startedDevice` with it.
+    lazy var deviceId: String = {
         if let existing = defaults.string(forKey: Self.deviceIdKey) { return existing }
         let fresh = UUID().uuidString
         defaults.set(fresh, forKey: Self.deviceIdKey)
@@ -191,6 +194,7 @@ final class SyncEngine {
     /// double-register the foreground/background observers or start a second poll loop.
     func attach(store: SyncTaskStoring) {
         self.store = store
+        self.rewardStore = store as? SyncRewardStoring
         guard !hasAttached else { return }
         hasAttached = true
         registerLifecycleObservers()
@@ -217,6 +221,7 @@ final class SyncEngine {
         cursorEpoch &+= 1
         defaults.removeObject(forKey: Self.cursorTasksKey)
         defaults.removeObject(forKey: Self.cursorCompletionsKey)
+        defaults.removeObject(forKey: Self.cursorRewardsKey)
         requestSync(reason: .manualResync)
     }
 
@@ -559,6 +564,7 @@ final class SyncEngine {
         let epoch = cursorEpoch
         let pendingTasks = store.pendingForSync(limit: Self.batchLimit)
         let pendingCompletions = store.pendingCompletions(limit: Self.batchLimit)
+        let pendingRewards = rewardStore?.pendingRewardsForSync(limit: Self.batchLimit) ?? []
 
         let request = SyncExchangeRequest(
             cursorTasks: trustedCursor(forKey: Self.cursorTasksKey),
@@ -567,6 +573,8 @@ final class SyncEngine {
             deviceLabel: deviceLabel,
             tasks: pendingTasks.map(SyncTaskOutbound.init),
             completions: pendingCompletions.map(SyncCompletionOutbound.init),
+            cursorRewards: trustedCursor(forKey: Self.cursorRewardsKey),
+            rewards: pendingRewards.map(SyncRewardOutbound.init),
             limit: Self.batchLimit
         )
 
@@ -599,17 +607,24 @@ final class SyncEngine {
         // way it doesn't for `markSynced`/`markCompletionsSynced` below (those stay `try?` by
         // design — losing a confirmation just re-pushes a row the server will happily no-op via
         // LWW/`on conflict do nothing`, cost is a wasted round, not lost data).
+        var appliedTaskIds: [UUID] = []
+        var appliedRewardIds: [UUID] = []
         do {
             let remoteTasks = response.tasks.map(\.asRemoteTask)
             if !remoteTasks.isEmpty {
                 // `TaskStore.applyRemote` (group A) owns the "don't re-stamp `updatedAt`"
                 // suppression required by contract §4; this file only calls through
                 // `SyncTaskStoring` and never touches `updatedAt` itself.
-                _ = try store.applyRemote(remoteTasks)
+                appliedTaskIds = try store.applyRemote(remoteTasks)
             }
             let remoteCompletions = response.completions.map(\.asRemoteCompletion)
             if !remoteCompletions.isEmpty {
                 _ = try store.applyRemoteCompletions(remoteCompletions)
+            }
+            // Rewards: same do block, so a failed write skips every cursor (§4b).
+            let remoteRewards = response.rewards.map(\.asRemoteReward)
+            if !remoteRewards.isEmpty, let rewardStore {
+                appliedRewardIds = try rewardStore.applyRemoteRewards(remoteRewards)
             }
         } catch {
             // Disk write failed. Do NOT advance the cursor (still holding the pre-round value in
@@ -621,6 +636,13 @@ final class SyncEngine {
             // failure mode this whole reordering exists to surface.
             lastFailure = .server(status: -1, message: "local persistence failed")
             return nil
+        }
+
+        if !appliedTaskIds.isEmpty || !appliedRewardIds.isEmpty {
+            NotificationCenter.default.post(
+                name: .volarSyncDidApplyRemote, object: nil,
+                userInfo: ["taskIds": appliedTaskIds, "rewardIds": appliedRewardIds]
+            )
         }
 
         // Only now — rows are durably on disk — is it safe to tell the server "don't resend these".
@@ -653,6 +675,18 @@ final class SyncEngine {
             store.markSynced(confirmedTasks)
         }
 
+        // Rewards: confirm with the echoed `updatedAt`, same reasoning as tasks above.
+        if let rewardStore, !pendingRewards.isEmpty {
+            let echoedRewards = response.rewards.reduce(into: [UUID: Date]()) { dict, row in
+                if dict[row.id] == nil { dict[row.id] = row.updatedAt }
+            }
+            var confirmedRewards: [UUID: Date] = [:]
+            for pending in pendingRewards {
+                if let echoed = echoedRewards[pending.item.id] { confirmedRewards[pending.item.id] = echoed }
+            }
+            if !confirmedRewards.isEmpty { rewardStore.markRewardsSynced(confirmedRewards) }
+        }
+
         // Completions can never lose a conflict (append-only, `on conflict do nothing` — migration
         // 0005's own header on `completions`) — a 2xx response means every completion in THIS
         // push was accepted, full stop.
@@ -676,6 +710,9 @@ final class SyncEngine {
         let newCursorCompletions = SyncMerge.nextCursor(
             previous: defaults.string(forKey: Self.cursorCompletionsKey), candidate: response.cursorCompletions
         )
+        let newCursorRewards = SyncMerge.nextCursor(
+            previous: defaults.string(forKey: Self.cursorRewardsKey), candidate: response.cursorRewards
+        )
         // `resyncFromScratch()` guard: if the epoch moved while this round was in flight, this
         // round's cursor describes a page that began at the position the user just asked to
         // discard — writing it would silently undo the reset (`cursorEpoch`'s doc comment). Only
@@ -685,13 +722,14 @@ final class SyncEngine {
         if epoch == cursorEpoch {
             defaults.set(newCursorTasks, forKey: Self.cursorTasksKey)
             defaults.set(newCursorCompletions, forKey: Self.cursorCompletionsKey)
+            defaults.set(newCursorRewards, forKey: Self.cursorRewardsKey)
         }
 
         let now = Date()
         lastSuccessAt = now
         defaults.set(now, forKey: Self.lastSuccessAtKey)
 
-        let pulledSomething = !response.tasks.isEmpty || !response.completions.isEmpty
+        let pulledSomething = !response.tasks.isEmpty || !response.completions.isEmpty || !response.rewards.isEmpty
         return (hasMore: response.hasMore, pulledSomething: pulledSomething)
     }
 

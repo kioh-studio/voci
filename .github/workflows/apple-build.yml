@@ -1,0 +1,105 @@
+# Builds + tests the macOS app and the iOS app on a GitHub-hosted Mac (free for this public repo).
+# The dev machine is Windows (no Swift toolchain), so this is the only compiler the Swift code sees
+# until anh Khôi builds on a real Mac. Every step runs even if an earlier one fails, so one push
+# reports every compile error at once; the last step turns any failure into a red run.
+name: apple-build
+
+on:
+  push:
+    branches: [macos]
+    paths-ignore: ["**.md", "design/**", "marketing/**", "docs/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: apple-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      NSUnbufferedIO: YES
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode version
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app || sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort | tail -1)"
+          xcodebuild -version
+          xcrun simctl list devices available | grep -m3 iPhone || true
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate projects
+        run: |
+          (cd Volar && xcodegen generate)
+          (cd VolarIOS && xcodegen generate)
+
+      - name: Resolve packages (macOS)
+        run: xcodebuild -resolvePackageDependencies -project Volar/Volar.xcodeproj -scheme Volar -derivedDataPath DerivedData
+
+      - name: Build macOS
+        id: build_mac
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild build -project Volar/Volar.xcodeproj -scheme Volar -destination 'platform=macOS' \
+            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" \
+            -skipPackagePluginValidation -skipMacroValidation 2>&1 | tee build-mac.log | grep -E "error:|warning: unre|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" build-mac.log
+
+      - name: Test macOS
+        id: test_mac
+        if: always() && steps.build_mac.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild test -project Volar/Volar.xcodeproj -scheme Volar -destination 'platform=macOS' \
+            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" \
+            -skipPackagePluginValidation -skipMacroValidation 2>&1 | tee test-mac.log | grep -E "error:|Test Case .* (failed|passed)|Executed|TEST (SUCCEEDED|FAILED)" || true
+          grep -q "TEST SUCCEEDED" test-mac.log
+
+      - name: Build iOS (simulator)
+        id: build_ios
+        if: always()
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild build -project VolarIOS/VolarIOS.xcodeproj -scheme VolarIOS \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath DerivedData \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" -skipPackagePluginValidation -skipMacroValidation \
+            2>&1 | tee build-ios.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" build-ios.log
+
+      - name: Test iOS (simulator)
+        id: test_ios
+        if: always() && steps.build_ios.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          DEVICE=$(xcrun simctl list devices available | grep -m1 -oE "iPhone 1[5-9][^(]*" | sed 's/ *$//')
+          echo "Using simulator: $DEVICE"
+          xcodebuild test -project VolarIOS/VolarIOS.xcodeproj -scheme VolarIOS \
+            -destination "platform=iOS Simulator,name=$DEVICE" -derivedDataPath DerivedData \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" -skipPackagePluginValidation -skipMacroValidation \
+            2>&1 | tee test-ios.log | grep -E "error:|Test Case .* (failed|passed)|Executed|TEST (SUCCEEDED|FAILED)" || true
+          grep -q "TEST SUCCEEDED" test-ios.log
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-logs
+          path: "*.log"
+          if-no-files-found: ignore
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "build_mac=${{ steps.build_mac.outcome }} test_mac=${{ steps.test_mac.outcome }} build_ios=${{ steps.build_ios.outcome }} test_ios=${{ steps.test_ios.outcome }}"
+          for f in build-mac.log build-ios.log test-mac.log test-ios.log; do
+            [ -f "$f" ] && { echo "== $f: errors =="; grep -E "error:" "$f" | sort -u | head -80; }
+          done
+          [ "${{ steps.build_mac.outcome }}" = "success" ] && [ "${{ steps.test_mac.outcome }}" = "success" ] && [ "${{ steps.build_ios.outcome }}" = "success" ] && [ "${{ steps.test_ios.outcome }}" = "success" ]
