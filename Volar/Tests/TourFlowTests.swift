@@ -31,7 +31,8 @@ final class TourFlowTests: XCTestCase {
     /// so duplicated here rather than exposed — same "know the literal key, not a symbol" approach
     /// `ReminderSchedulerTests.swift`'s own fixtures don't need since none of ITS persisted keys
     /// are exercised across test runs the way this one is).
-    private static let hasSeenTourKey = "volar.hasSeenTourV1"
+    // `nonisolated`: read from non-isolated `setUp`/`tearDown` under Swift 6 (CI 2026-10-11).
+    private nonisolated static let hasSeenTourKey = "volar.hasSeenTourV1"
 
     override func setUp() {
         super.setUp()
