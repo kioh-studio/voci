@@ -192,6 +192,7 @@ final class RewardCenter {
             content: content,
             trigger: UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
         )
-        UNUserNotificationCenter.current().add(request) { _ in }
+        // `@Sendable`: same off-main completion trap `NotificationCenterSendable.volarAdd` documents.
+        UNUserNotificationCenter.current().add(request) { @Sendable _ in }
     }
 }

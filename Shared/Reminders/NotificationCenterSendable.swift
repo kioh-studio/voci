@@ -42,7 +42,10 @@ extension UNUserNotificationCenter {
     @MainActor
     func volarAdd(_ request: UNNotificationRequest) async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            add(request) { _ in continuation.resume() }
+            // `@Sendable` is load-bearing (CI crash 2026-10-11, SIGTRAP in dispatch_assert_queue):
+            // a closure literal formed in a `@MainActor` context is inferred main-actor-isolated,
+            // and UserNotifications invokes it on its own queue — Swift 6 traps on that call.
+            add(request) { @Sendable _ in continuation.resume() }
         }
     }
 }
