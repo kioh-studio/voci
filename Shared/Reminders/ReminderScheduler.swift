@@ -226,9 +226,9 @@ final class ReminderScheduler: NSObject {
     /// notification's identifier as `.delivered`, in a single batched save (one `fetchAllRecords()`
     /// — no fetch-in-loop). No-op if nothing was delivered or nothing needs updating.
     private func reconcileDeliveredNotifications() async {
-        let delivered = await center.deliveredNotifications()
+        let delivered = await center.volarDeliveredSummaries()
         guard !delivered.isEmpty else { return }
-        let deliveredIds = Set(delivered.compactMap { UUID(uuidString: $0.request.identifier) })
+        let deliveredIds = Set(delivered.compactMap { UUID(uuidString: $0.identifier) })
         guard !deliveredIds.isEmpty else { return }
         var didChange = false
         for record in fetchAllRecords() where record.state == "scheduled" && deliveredIds.contains(record.id) {
@@ -592,8 +592,8 @@ final class ReminderScheduler: NSObject {
     private func refillSystemRequests() {
         _Concurrency.Task { @MainActor [weak self] in
             guard let self else { return }
-            let pending = await self.center.pendingNotificationRequests()
-            let pendingIds = pending.compactMap { UUID(uuidString: $0.identifier) }
+            let pending = await self.center.volarPendingIdentifiers()
+            let pendingIds = pending.compactMap { UUID(uuidString: $0) }
             let capacity = Self.systemRequestCap - pending.count
             guard capacity > 0 else { return }
             let candidates = Self.nearestCandidates(self.fetchAllRecords(), excluding: pendingIds, capacity: capacity)
@@ -729,14 +729,14 @@ final class ReminderScheduler: NSObject {
         let tasksById = Dictionary(uniqueKeysWithValues: store.fetchAll().map { ($0.id, $0) })
         _Concurrency.Task { @MainActor [weak self] in
             guard let self else { return }
-            let delivered = await self.center.deliveredNotifications()
+            let delivered = await self.center.volarDeliveredSummaries()
             // The REAL delivery moment per identifier (`UNNotification.date`) — not `fireAt`. A
             // record whose identifier isn't a key here is simply no longer in Notification Center
             // (already interacted with) OR its date couldn't be resolved; either way it's excluded
             // below rather than ever falling back to `fireAt`.
             var deliveredAtById: [UUID: Date] = [:]
             for notification in delivered {
-                if let id = UUID(uuidString: notification.request.identifier) {
+                if let id = UUID(uuidString: notification.identifier) {
                     deliveredAtById[id] = notification.date
                 }
             }

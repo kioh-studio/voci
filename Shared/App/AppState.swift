@@ -1158,6 +1158,8 @@ final class AppState {
     @ObservationIgnored var rewardCenterDidApplyRemote: (() -> Void)?
     /// Which tier the most recent `router.parse` used (`.titleOnly` = nothing smart ran, e.g. offline).
     var lastParseRoute: IntentRouter.Route { router.lastRoute }
+    /// Token of the `.volarSyncDidApplyRemote` observer so `activateServices()` registers it once.
+    @ObservationIgnored private var syncApplyObserverToken: (any NSObjectProtocol)?
 
     /// Thin wrapper for `ReparseReviewSheet` (one cloud call per capture).
     func reparse(_ transcript: String) async -> [ParsedTask] {
@@ -2385,6 +2387,17 @@ final class AppState {
         scheduler?.scheduleReminders(taskId: id)
         notifyEligibilityAndScheduleResurface(before: before, now: now)
         syncCalendarMirror()
+    }
+
+    /// Sets/clears a task's repeat rule. The store rejects recurrence on a task with children
+    /// (`TaskStoreError.recurrenceRequiresLeaf`) — then nothing changes. Mirrors `updateTask`'s
+    /// refresh -> reminders -> calendar/sync tail. UNVERIFIED: written blind.
+    func setTaskRecurrence(_ id: UUID, _ recurrence: Recurrence?) {
+        guard let store else { return }
+        do { try store.setRecurrence(recurrence, on: id) } catch { return }
+        tasks = store.fetchAll()
+        scheduler?.scheduleReminders(taskId: id)
+        syncCalendarMirror() // also calls notifySyncOfLocalEdit()
     }
 
     /// WG-C (FR-020 gap fix): `ReminderScheduler.handleAction`'s notification "Done" action calls
@@ -5166,7 +5179,10 @@ final class AppState {
         focusSecondsLeft = 25 * 60
         focusPaused = false
         let openNow = openTasks
-        focusIndex = openNow.firstIndex { $0.frog } ?? 0
+        // Prefer the Now hero (`dashboardActiveTask`) so Focus opens on the task the user is looking
+        // at; then the frog; then 0. UNVERIFIED: written blind.
+        focusIndex = dashboardActiveTask.flatMap { active in openNow.firstIndex { $0.id == active.id } }
+            ?? openNow.firstIndex { $0.frog } ?? 0
         focusActive = true
         if voiceFeedback {
             voice.speak("Focus session started. \(frogTask?.title ?? "Twenty five minutes.")")
@@ -6247,8 +6263,9 @@ final class AppState {
         // leaving `VolarApp.swift`'s correct path as the only wake trigger).
         scheduler?.rebuildFromStorage()
         // MARK: - 011 offline capture: remote sync applied rows -> refresh + re-arm/cancel reminders.
-        // UNVERIFIED: written blind. Not idempotent if activateServices() runs twice (same as other observers here).
-        NotificationCenter.default.addObserver(
+        // UNVERIFIED: written blind. Idempotent via `syncApplyObserverToken`.
+        if syncApplyObserverToken == nil {
+        syncApplyObserverToken = NotificationCenter.default.addObserver(
             forName: .volarSyncDidApplyRemote, object: nil, queue: .main
         ) { @Sendable [weak self] note in
             let ids = (note.userInfo?["taskIds"] as? [UUID]) ?? []
@@ -6264,6 +6281,7 @@ final class AppState {
                 }
                 self.rewardCenterDidApplyRemote?()
             }
+        }
         }
         // CB-1: `ReminderScheduler` self-assigns as `UNUserNotificationCenter.current().delegate`
         // inside its own `init` (`ReminderScheduler.swift`) — there is no separate

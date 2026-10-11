@@ -29,6 +29,7 @@ final class RewardCenter {
     init(store: TaskStore?) {
         self.store = store
         refresh()
+        store?.sweepRewardTombstones()
     }
 
     func refresh() {

@@ -35,6 +35,22 @@ extension TaskStore {
         save()
     }
 
+    /// Local sweep: physically deletes tombstones older than `days` that the server has already
+    /// confirmed (`syncedAt != nil`) — an unsynced tombstone must still be pushed. Mirrors the sweep
+    /// in `TaskStore.fetchAll()`. UNVERIFIED: written blind.
+    func sweepRewardTombstones(olderThan days: Int = 30, now: Date = Date()) {
+        let cutoff = now.addingTimeInterval(-Double(days) * 24 * 60 * 60)
+        let expired = fetchAllRewardModelsIncludingDeleted().filter { model in
+            guard let deletedAt = model.deletedAt, model.syncedAt != nil else { return false }
+            return deletedAt < cutoff
+        }
+        guard !expired.isEmpty else { return }
+        withoutStamping {
+            for model in expired { context.delete(model) }
+            save()
+        }
+    }
+
     /// The task's one live grant (kind grant, not deleted, not closed). If a corrupted store holds
     /// more than one, the newest `updatedAt` wins (the repair after sync tombstones the rest).
     func liveGrant(for taskId: UUID) -> RewardItem? {

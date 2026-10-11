@@ -4,6 +4,7 @@
 // UNVERIFIED: written on Windows, never compiled or run — confirm on Mac.
 import XCTest
 import Foundation
+import SwiftData
 @testable import Volar
 
 @MainActor
@@ -84,6 +85,29 @@ final class RewardTests: XCTestCase {
         XCTAssertNotNil(store.pendingRewardsForSync(limit: 10).first { $0.item.id == b.id })
         store.deleteReward(a.id)
         XCTAssertNotNil(store.pendingRewardsForSync(limit: 10).first { $0.item.id == a.id })
+    }
+
+    func testSweepRemovesOnlySyncedOldTombstones() throws {
+        let store = try makeStore()
+        let now = Date()
+        func tombstone(ageDays: Double, synced: Bool) throws -> UUID {
+            let item = RewardItem(kind: .catalog, title: "T", minutes: 10)
+            store.addReward(item)
+            let model = try XCTUnwrap(store.context.fetch(FetchDescriptor<RewardRecord>()).first { $0.id == item.id })
+            store.withoutStamping {
+                model.deletedAt = now.addingTimeInterval(-ageDays * 86_400)
+                model.syncedAt = synced ? now : nil
+            }
+            return item.id
+        }
+        let oldSynced = try tombstone(ageDays: 40, synced: true)
+        let oldUnsynced = try tombstone(ageDays: 40, synced: false)
+        let recentSynced = try tombstone(ageDays: 10, synced: true)
+        store.sweepRewardTombstones(now: now)
+        let left = Set(try store.context.fetch(FetchDescriptor<RewardRecord>()).map(\.id))
+        XCTAssertFalse(left.contains(oldSynced))
+        XCTAssertTrue(left.contains(oldUnsynced))
+        XCTAssertTrue(left.contains(recentSynced))
     }
 
     // MARK: - RewardCenter snapshots

@@ -14,7 +14,7 @@ struct TaskDetailIOSView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("volar.view.goalRewards") private var goalRewardsOn = false
 
-    private enum Panel { case date, time, duration, priority, reminder }
+    private enum Panel { case date, time, duration, priority, reminder, repeatRule }
 
     @State private var panel: Panel?
     @State private var titleDraft = ""
@@ -204,15 +204,15 @@ struct TaskDetailIOSView: View {
             }
         }
         RowDivider()
-        // AppState exposes no recurrence setter, so Repeat is read-only for now (backlog).
-        HStack(spacing: 8) {
-            ValueRow(icon: "repeat", title: "Repeat", value: Self.repeatLabel(task.recurrence), chevron: false)
-            Text("Soon")
-                .font(IOSFont.mono(11, .semibold))
-                .foregroundStyle(IOSPalette.fg3)
-                .padding(.horizontal, 8).padding(.vertical, 3)
-                .background(IOSPalette.bg2, in: Capsule())
-                .padding(.trailing, 16)
+        ValueRow(icon: "repeat", title: "Repeat", value: Self.repeatLabel(task.recurrence),
+                 chevron: false) { toggle(.repeatRule) }
+        if panel == .repeatRule {
+            chips {
+                chip("Never", selected: task.recurrence == nil) { appState.setTaskRecurrence(taskId, nil) }
+                chip("Daily", selected: task.recurrence == .daily) { appState.setTaskRecurrence(taskId, .daily) }
+                chip("Weekly", selected: task.recurrence == .weekly) { appState.setTaskRecurrence(taskId, .weekly) }
+                chip("Monthly", selected: task.recurrence == .monthly) { appState.setTaskRecurrence(taskId, .monthly) }
+            }
         }
     }
 
