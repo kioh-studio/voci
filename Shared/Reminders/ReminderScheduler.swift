@@ -226,7 +226,7 @@ final class ReminderScheduler: NSObject {
     /// notification's identifier as `.delivered`, in a single batched save (one `fetchAllRecords()`
     /// — no fetch-in-loop). No-op if nothing was delivered or nothing needs updating.
     private func reconcileDeliveredNotifications() async {
-        let delivered = await center.volarDeliveredSummaries()
+        let delivered = await UNUserNotificationCenter.volarDeliveredSummaries()
         guard !delivered.isEmpty else { return }
         let deliveredIds = Set(delivered.compactMap { UUID(uuidString: $0.identifier) })
         guard !deliveredIds.isEmpty else { return }
@@ -592,7 +592,7 @@ final class ReminderScheduler: NSObject {
     private func refillSystemRequests() {
         _Concurrency.Task { @MainActor [weak self] in
             guard let self else { return }
-            let pending = await self.center.volarPendingIdentifiers()
+            let pending = await UNUserNotificationCenter.volarPendingIdentifiers()
             let pendingIds = pending.compactMap { UUID(uuidString: $0) }
             let capacity = Self.systemRequestCap - pending.count
             guard capacity > 0 else { return }
@@ -729,7 +729,7 @@ final class ReminderScheduler: NSObject {
         let tasksById = Dictionary(uniqueKeysWithValues: store.fetchAll().map { ($0.id, $0) })
         _Concurrency.Task { @MainActor [weak self] in
             guard let self else { return }
-            let delivered = await self.center.volarDeliveredSummaries()
+            let delivered = await UNUserNotificationCenter.volarDeliveredSummaries()
             // The REAL delivery moment per identifier (`UNNotification.date`) — not `fireAt`. A
             // record whose identifier isn't a key here is simply no longer in Notification Center
             // (already interacted with) OR its date couldn't be resolved; either way it's excluded
@@ -795,13 +795,13 @@ final class ReminderScheduler: NSObject {
         let interval = max(record.fireAt.timeIntervalSinceNow, 1)
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
         let request = UNNotificationRequest(identifier: record.id.uuidString, content: content, trigger: trigger)
-        try? await center.add(request)
+        await center.volarAdd(request)
     }
 
     private func postImmediateRequest(recordId: UUID, offsetKind: String, task: TaskItem) async {
         let content = Self.buildContent(task: task, offsetKind: offsetKind)
         let request = UNNotificationRequest(identifier: recordId.uuidString, content: content, trigger: nil)
-        try? await center.add(request)
+        await center.volarAdd(request)
     }
 
     private static func buildContent(task: TaskItem, offsetKind: String) -> UNMutableNotificationContent {

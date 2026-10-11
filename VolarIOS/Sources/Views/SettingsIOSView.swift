@@ -86,7 +86,7 @@ struct SettingsIOSView: View {
     }
 
     private func loadNotificationStatus() async {
-        switch await UNUserNotificationCenter.current().volarAuthorizationStatus() {
+        switch await UNUserNotificationCenter.volarAuthorizationStatus() {
         case .authorized, .provisional, .ephemeral: notificationsStatus = "On"
         default: notificationsStatus = "Off"
         }

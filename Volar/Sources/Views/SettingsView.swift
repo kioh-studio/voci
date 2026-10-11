@@ -799,7 +799,7 @@ struct SettingsView: View {
         speechAuthStatus = SFSpeechRecognizer.authorizationStatus()
         appState.calendarAccess.refreshStatus()
         Task {
-            notifAuthStatus = await UNUserNotificationCenter.current().volarAuthorizationStatus()
+            notifAuthStatus = await UNUserNotificationCenter.volarAuthorizationStatus()
         }
     }
 

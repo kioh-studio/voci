@@ -50,10 +50,16 @@ final class ReminderContextGate {
     /// the mic themselves) — reading it does not itself request microphone access. Fails toward
     /// suppressed: any state other than a definite "no device / not in use" suppresses.
     private func isAnotherAppUsingMicrophone() -> Bool {
+        #if os(macOS)
         guard let device = AVCaptureDevice.default(for: .audio) else {
             // No audio input device at all — nothing else could plausibly be "on a call" via it.
             return false
         }
         return device.isInUseByAnotherApplication
+        #else
+        // `isInUseByAnotherApplication` is macOS-only. iOS manages call/mic contention itself
+        // (notifications are already muted during calls by the system), so nothing to suppress here.
+        return false
+        #endif
     }
 }
