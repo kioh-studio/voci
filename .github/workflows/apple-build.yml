@@ -55,10 +55,10 @@ jobs:
           RESP=$(curl -sS -X POST "$SB_URL/auth/v1/token?grant_type=password" -H "apikey: $SB_KEY" -H 'Content-Type: application/json' -d "$BODY") || { echo 'curl failed'; exit 0; }
           JWT=$(printf '%s' "$RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("access_token",""))')
           REFRESH=$(printf '%s' "$RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("refresh_token",""))')
-          UID=$(printf '%s' "$RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("user",{}).get("id",""))')
+          SB_UID=$(printf '%s' "$RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("user",{}).get("id",""))')
           if [ -z "$JWT" ]; then echo 'password grant failed (test will be skipped)'; printf '%s' "$RESP" | head -c 200; echo; exit 0; fi
           echo "::add-mask::$JWT"; echo "::add-mask::$REFRESH"
-          { echo "TEST_RUNNER_VOLAR_SYNC_TEST_JWT=$JWT"; echo "TEST_RUNNER_VOLAR_SYNC_TEST_REFRESH=$REFRESH"; echo "TEST_RUNNER_VOLAR_SYNC_TEST_UID=$UID"; echo "TEST_RUNNER_VOLAR_SYNC_TEST_EMAIL=$EMAIL"; } >> "$GITHUB_ENV"
+          { echo "TEST_RUNNER_VOLAR_SYNC_TEST_JWT=$JWT"; echo "TEST_RUNNER_VOLAR_SYNC_TEST_REFRESH=$REFRESH"; echo "TEST_RUNNER_VOLAR_SYNC_TEST_UID=$SB_UID"; echo "TEST_RUNNER_VOLAR_SYNC_TEST_EMAIL=$EMAIL"; } >> "$GITHUB_ENV"
           echo 'session ok'
 
       - name: Build macOS
