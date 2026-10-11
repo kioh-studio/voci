@@ -34,7 +34,7 @@ import XCTest
 @MainActor
 final class CaptureHotkeyAndTitleEditTests: XCTestCase {
 
-    private static let cloudParseConsentKey = "volar.cloudParseConsent"
+    private nonisolated static let cloudParseConsentKey = "volar.cloudParseConsent"
 
     override func setUp() {
         super.setUp()

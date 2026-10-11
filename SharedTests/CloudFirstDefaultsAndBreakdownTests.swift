@@ -43,8 +43,8 @@ import XCTest
 @MainActor
 final class CloudFirstDefaultsAndBreakdownTests: XCTestCase {
 
-    private static let speechEngineKey = "volar.speechEngine"
-    private static let cloudParseConsentKey = "volar.cloudParseConsent"
+    private nonisolated static let speechEngineKey = "volar.speechEngine"
+    private nonisolated static let cloudParseConsentKey = "volar.cloudParseConsent"
 
     override func setUp() {
         super.setUp()

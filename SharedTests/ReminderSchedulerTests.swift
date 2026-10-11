@@ -59,7 +59,7 @@ final class ReminderSchedulerTests: XCTestCase {
         XCTAssertEqual(atRecord?.fireAt, deadline)
         XCTAssertEqual(atRecord?.isHighUrgency, true)
         let overrideRecord = records.first { $0.offsetKind == "override" }
-        XCTAssertEqual(overrideRecord?.fireAt.timeIntervalSince(deadline), -86_400, accuracy: 1.0)
+        XCTAssertEqual((overrideRecord?.fireAt.timeIntervalSince(deadline) ?? .nan), -86_400, accuracy: 1.0)
         XCTAssertEqual(overrideRecord?.isHighUrgency, false)
     }
 
@@ -431,7 +431,7 @@ final class ReminderSchedulerTests: XCTestCase {
         XCTAssertEqual(before.count, 8, "hard cap protects the system's shared pending-notification ceiling")
         XCTAssertEqual(records.count, 9, "8 capped before-deadline marks + the at-deadline mark")
         let nearestToDeadline = before.max { $0.fireAt < $1.fireAt }
-        XCTAssertEqual(nearestToDeadline?.fireAt.timeIntervalSince(deadline), -600, accuracy: 0.01, "nearest surviving mark, after the 10-minute-gap dedup thinned the raw 1-minute cadence")
+        XCTAssertEqual((nearestToDeadline?.fireAt.timeIntervalSince(deadline) ?? .nan), -600, accuracy: 0.01, "nearest surviving mark, after the 10-minute-gap dedup thinned the raw 1-minute cadence")
     }
 
     /// `remindPeriod` wins outright over `fractionsRemaining` when both are set — never blended.
@@ -540,11 +540,11 @@ final class ReminderSchedulerTests: XCTestCase {
         XCTAssertFalse(records.isEmpty)
         let earliest = records.min { $0.fireAt < $1.fireAt }
         XCTAssertEqual(
-            earliest?.fireAt.timeIntervalSince(createdAt), 50_400, accuracy: 1.0,
+            (earliest?.fireAt.timeIntervalSince(createdAt) ?? .nan), 50_400, accuracy: 1.0,
             "next surviving mark is 14h out from createdAt (1h/3h/7h already passed) — NOT 1h from now"
         )
         XCTAssertEqual(
-            earliest?.fireAt.timeIntervalSince(now), 4 * 3600, accuracy: 1.0,
+            (earliest?.fireAt.timeIntervalSince(now) ?? .nan), 4 * 3600, accuracy: 1.0,
             "in now-relative terms that's 4h away, not the 1h it would be if the backoff had reset"
         )
     }
@@ -608,7 +608,7 @@ final class ReminderSchedulerTests: XCTestCase {
 
         XCTAssertFalse(records.isEmpty)
         let sorted = records.sorted { $0.fireAt < $1.fireAt }
-        XCTAssertEqual(sorted.first?.fireAt.timeIntervalSince(createdAt), 2 * 3600, accuracy: 1.0)
+        XCTAssertEqual((sorted.first?.fireAt.timeIntervalSince(createdAt) ?? .nan), 2 * 3600, accuracy: 1.0)
         for (record, index) in zip(sorted, 1...) {
             XCTAssertEqual(
                 record.fireAt.timeIntervalSince(createdAt), 2 * 3600 * Double(index), accuracy: 1.0,

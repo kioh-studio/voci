@@ -42,7 +42,7 @@ final class FocusSwitchTests: XCTestCase {
     /// symbol, and clean it in setUp/tearDown" convention `TourFlowTests.swift`'s `hasSeenTourKey`
     /// already establishes, needed here because the FR-030 "never re-offer" rule is specifically a
     /// claim about surviving BETWEEN test runs / app launches.
-    private static let switchBreakdownOfferedKey = "volar.switchBreakdownOffered"
+    private nonisolated static let switchBreakdownOfferedKey = "volar.switchBreakdownOffered"
 
     override func setUp() {
         super.setUp()

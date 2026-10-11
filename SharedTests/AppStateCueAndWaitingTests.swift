@@ -20,6 +20,7 @@ import XCTest
 import VolarCore
 @testable import Volar
 
+@MainActor
 final class AppStateCueAndWaitingTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 

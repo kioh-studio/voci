@@ -116,7 +116,7 @@ final class CalendarSyncTests: XCTestCase {
     // `CalendarSync` here never touches EventKit either (`CalendarAccess.eventStore` allocates
     // lazily on first use — see that file's own doc comment — and `CalendarSync.init` never reads
     // it), so this is safe to run unconditionally in CI/on any machine.
-    private static let mirrorEnabledDefaultsKey = "volar.calendarMirrorEnabled"
+    private nonisolated static let mirrorEnabledDefaultsKey = "volar.calendarMirrorEnabled"
 
     override func setUp() {
         super.setUp()
