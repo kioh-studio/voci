@@ -299,6 +299,15 @@ actor AccountService {
         }
     }
 
+    /// Test seam (`SharedTests/SyncIntegrationTests.swift`, 2026-10-11): adopts a session obtained
+    /// out-of-band (CI does a password grant with a dedicated Pro test user) so the REAL sync
+    /// stack — `SyncClient` → `validAccessToken()` → `sync_exchange` — runs against production
+    /// inside the test process. Internal, not private, for `@testable import` only; no app code
+    /// calls it. Same effect as `verifyEmailOTP` succeeding.
+    func adoptSession(_ session: AccountSession) {
+        store(session)
+    }
+
     @discardableResult
     private func store(_ session: AccountSession) -> AccountUser {
         cachedSession = session

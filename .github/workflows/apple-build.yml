@@ -40,6 +40,25 @@ jobs:
       - name: Resolve packages (macOS)
         run: xcodebuild -resolvePackageDependencies -project Volar/Volar.xcodeproj -scheme Volar -derivedDataPath DerivedData
 
+      - name: Sign in the CI sync account (integration test session)
+        id: sync_session
+        if: always()
+        env:
+          EMAIL: ${{ secrets.VOLAR_SYNC_TEST_EMAIL }}
+          PASSWORD: ${{ secrets.VOLAR_SYNC_TEST_PASSWORD }}
+        run: |
+          if [ -z "$EMAIL" ]; then echo 'no sync secrets; integration test will be skipped'; exit 0; fi
+          RESP=$(curl -s -X POST 'https://cjaamylayaylbuuhwlnz.supabase.co/auth/v1/token?grant_type=password' \n            -H 'apikey: sb_publishable_WkBa-2lGcl10NBf8JrCfJA__FPNjjf0' -H 'Content-Type: application/json' \n            -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}")
+          JWT=$(echo "$RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("access_token",""))')
+          REFRESH=$(echo "$RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("refresh_token",""))')
+          UID=$(echo "$RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("user",{}).get("id",""))')
+          echo "::add-mask::$JWT"; echo "::add-mask::$REFRESH"
+          echo "TEST_RUNNER_VOLAR_SYNC_TEST_JWT=$JWT" >> "$GITHUB_ENV"
+          echo "TEST_RUNNER_VOLAR_SYNC_TEST_REFRESH=$REFRESH" >> "$GITHUB_ENV"
+          echo "TEST_RUNNER_VOLAR_SYNC_TEST_UID=$UID" >> "$GITHUB_ENV"
+          echo "TEST_RUNNER_VOLAR_SYNC_TEST_EMAIL=$EMAIL" >> "$GITHUB_ENV"
+          [ -n "$JWT" ] && echo 'session ok' || echo 'password grant failed (test will be skipped)'
+
       - name: Build macOS
         id: build_mac
         continue-on-error: true
@@ -58,7 +77,7 @@ jobs:
           set -o pipefail
           xcodebuild test -project Volar/Volar.xcodeproj -scheme Volar -destination 'platform=macOS' \
             -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" \
-            -skipPackagePluginValidation -skipMacroValidation 2>&1 | tee test-mac.log | grep -E "error:|Test Case .* (failed|passed)|Executed|TEST (SUCCEEDED|FAILED)" || true
+            -skipPackagePluginValidation -skipMacroValidation 2>&1 | tee test-mac.log | grep -E "error:|Test Case .* (failed|passed|skipped)|Executed|TEST (SUCCEEDED|FAILED)|SyncIntegration" || true
           grep -q "TEST SUCCEEDED" test-mac.log
 
       - name: Build iOS (simulator)
@@ -84,7 +103,7 @@ jobs:
           xcodebuild test -project VolarIOS/VolarIOS.xcodeproj -scheme VolarIOS \
             -destination "platform=iOS Simulator,name=$DEVICE" -derivedDataPath DerivedData \
             CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" -skipPackagePluginValidation -skipMacroValidation \
-            2>&1 | tee test-ios.log | grep -E "error:|Test Case .* (failed|passed)|Executed|TEST (SUCCEEDED|FAILED)" || true
+            2>&1 | tee test-ios.log | grep -E "error:|Test Case .* (failed|passed|skipped)|Executed|TEST (SUCCEEDED|FAILED)|SyncIntegration" || true
           grep -q "TEST SUCCEEDED" test-ios.log
 
       - name: Collect crash reports
