@@ -95,7 +95,14 @@ final class CalendarAccess {
     /// `authorizationStatus(for:)` rather than assumed.
     func requestAccess() async {
         do {
-            let granted = try await eventStore.requestFullAccessToEvents()
+            // Completion-handler form (CI 2026-10-11): the async overload sends the non-Sendable
+            // `EKEventStore` across isolation under Swift 6; this call stays on the main actor.
+            let store = eventStore
+            let granted: Bool = try await withCheckedThrowingContinuation { continuation in
+                store.requestFullAccessToEvents { ok, error in
+                    if let error { continuation.resume(throwing: error) } else { continuation.resume(returning: ok) }
+                }
+            }
             status = granted ? .granted : Self.map(EKEventStore.authorizationStatus(for: .event))
             lastError = nil
             calendarCount = granted ? eventStore.calendars(for: .event).count : 0
