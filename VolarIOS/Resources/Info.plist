@@ -2,8 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Must match PRODUCT_BUNDLE_IDENTIFIER in project.yml (tech.kioh.Volar, identical to macOS for
+	     Universal Purchase). A literal `.ios` value here broke the App Intents build step on CI
+	     ("Mismatch bundle identifier values between Info.plist and --bundle-id", 2026-10-11). -->
 	<key>CFBundleIdentifier</key>
-	<string>tech.kioh.Volar.ios</string>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleName</key>
 	<string>Volar</string>
 	<key>CFBundleDisplayName</key>
