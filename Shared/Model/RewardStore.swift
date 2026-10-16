@@ -51,11 +51,11 @@ extension TaskStore {
         }
     }
 
-    /// The task's one live grant (kind grant, not deleted, not closed). If a corrupted store holds
+    /// The goal's one live grant (kind grant, not deleted, not closed). If a corrupted store holds
     /// more than one, the newest `updatedAt` wins (the repair after sync tombstones the rest).
-    func liveGrant(for taskId: UUID) -> RewardItem? {
+    func liveGrant(forGoal goalId: UUID) -> RewardItem? {
         liveGrantModels()
-            .filter { $0.taskId == taskId }
+            .filter { $0.goalIds.contains(goalId) }
             .max(by: { $0.updatedAt < $1.updatedAt })?
             .asItem
     }
@@ -92,7 +92,7 @@ extension TaskStore {
 
     private func liveGrantModels() -> [RewardRecord] {
         fetchRewardModels().filter {
-            $0.kindRaw == RewardKind.grant.rawValue && $0.closedAt == nil && $0.taskId != nil
+            $0.kindRaw == RewardKind.grant.rawValue && $0.closedAt == nil && !$0.goalIds.isEmpty
         }
     }
 

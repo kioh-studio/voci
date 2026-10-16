@@ -19,7 +19,7 @@ một bộ (sync 008). Sáu việc lõi trên iPhone:
 | # | Quyết định |
 |---|---|
 | D1 | Earned break **lên iOS v1**. Phần thưởng do user tự đặt (tên + số phút), không dùng AI, không điểm, không coin, không bao giờ phạt hay khoá |
-| D2 | Phần thưởng gắn với **một task hoặc một goal** (goal = task, có thể có task con). **KHÔNG** có kiểu thưởng "xong N việc bất kỳ"; muốn thưởng cho cả cụm việc thì gom thành goal |
+| D2 | ~~Phần thưởng gắn với **một task hoặc một goal**; KHÔNG có kiểu thưởng "xong N việc"~~ **ĐÃ THAY 2026-10-16:** một grant gắn với **1..N goal** (`taskIds`), mở khi tất cả done — xem `multi-goal-rewards.md` |
 | D3 | Phần thưởng có thời lượng → app **đếm giờ và nhắc** khi hết giờ nghỉ |
 | D4 | Phần thưởng lưu ở **bảng riêng** `rewards`, không thêm field vào task, có đường sync riêng |
 | D5 | **Bắt việc khi offline: CÓ** trong v1 |

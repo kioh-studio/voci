@@ -8,7 +8,7 @@ import Foundation
 import SwiftData
 
 enum RewardKind: String, Codable, Sendable {
-    case catalog, grant
+    case catalog, goal, grant
 }
 
 enum RewardIcon: String, CaseIterable, Codable, Sendable {
@@ -34,8 +34,12 @@ final class RewardRecord {
     var title: String?
     var minutes: Int?
     var iconRaw: String?
-    /// Grant only.
+    /// Legacy column = `taskIds.first`, kept so rows saved before multi-goal still read.
     var taskId: UUID?
+    /// Goal only (multi-goal-rewards.md G1): the goal's tasks; the goal is done when ALL are done.
+    var taskIds: [UUID] = []
+    /// Grant only: the goals; the reward unlocks when ALL are done.
+    var goalIds: [UUID] = []
     /// Grant only; nil = a goal without a reward.
     var rewardId: UUID?
     var breakStartedAt: Date?
@@ -64,7 +68,8 @@ final class RewardRecord {
             title: title,
             minutes: minutes,
             icon: iconRaw.flatMap { RewardIcon(rawValue: $0) },
-            taskId: taskId,
+            taskIds: taskIds.isEmpty ? [taskId].compactMap { $0 } : taskIds,
+            goalIds: goalIds,
             rewardId: rewardId,
             breakStartedAt: breakStartedAt,
             breakEndsAt: breakEndsAt,
@@ -81,7 +86,9 @@ final class RewardRecord {
         title = item.title
         minutes = item.minutes
         iconRaw = item.icon?.rawValue
-        taskId = item.taskId
+        taskId = item.taskIds.first
+        taskIds = item.taskIds
+        goalIds = item.goalIds
         rewardId = item.rewardId
         breakStartedAt = item.breakStartedAt
         breakEndsAt = item.breakEndsAt
@@ -99,7 +106,10 @@ struct RewardItem: Identifiable, Sendable, Equatable, Codable {
     var title: String?
     var minutes: Int?
     var icon: RewardIcon?
-    var taskId: UUID?
+    /// Goal only; else [].
+    var taskIds: [UUID]
+    /// Grant only; else [].
+    var goalIds: [UUID]
     var rewardId: UUID?
     var breakStartedAt: Date?
     var breakEndsAt: Date?
@@ -114,7 +124,8 @@ struct RewardItem: Identifiable, Sendable, Equatable, Codable {
         title: String? = nil,
         minutes: Int? = nil,
         icon: RewardIcon? = nil,
-        taskId: UUID? = nil,
+        taskIds: [UUID] = [],
+        goalIds: [UUID] = [],
         rewardId: UUID? = nil,
         breakStartedAt: Date? = nil,
         breakEndsAt: Date? = nil,
@@ -128,7 +139,8 @@ struct RewardItem: Identifiable, Sendable, Equatable, Codable {
         self.title = title
         self.minutes = minutes
         self.icon = icon
-        self.taskId = taskId
+        self.taskIds = taskIds
+        self.goalIds = goalIds
         self.rewardId = rewardId
         self.breakStartedAt = breakStartedAt
         self.breakEndsAt = breakEndsAt
@@ -139,7 +151,7 @@ struct RewardItem: Identifiable, Sendable, Equatable, Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, title, minutes, icon, taskId, rewardId, breakStartedAt, breakEndsAt
+        case id, kind, title, minutes, icon, taskId, taskIds, goalIds, rewardId, breakStartedAt, breakEndsAt
         case startedDevice, closedAt, remindWhenOver, createdAt
     }
 
@@ -152,7 +164,12 @@ struct RewardItem: Identifiable, Sendable, Equatable, Codable {
         title = try c.decodeIfPresent(String.self, forKey: .title)
         minutes = try c.decodeIfPresent(Int.self, forKey: .minutes)
         icon = (try c.decodeIfPresent(String.self, forKey: .icon)).flatMap { RewardIcon(rawValue: $0) }
-        taskId = try c.decodeIfPresent(UUID.self, forKey: .taskId)
+        if let ids = try c.decodeIfPresent([UUID].self, forKey: .taskIds) {
+            taskIds = ids
+        } else {
+            taskIds = (try c.decodeIfPresent(UUID.self, forKey: .taskId)).map { [$0] } ?? []
+        }
+        goalIds = try c.decodeIfPresent([UUID].self, forKey: .goalIds) ?? []
         rewardId = try c.decodeIfPresent(UUID.self, forKey: .rewardId)
         breakStartedAt = try c.decodeIfPresent(Date.self, forKey: .breakStartedAt)
         breakEndsAt = try c.decodeIfPresent(Date.self, forKey: .breakEndsAt)
@@ -161,6 +178,26 @@ struct RewardItem: Identifiable, Sendable, Equatable, Codable {
         remindWhenOver = try c.decodeIfPresent(Bool.self, forKey: .remindWhenOver) ?? true
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
     }
+
+    /// Writes BOTH `taskId` (= first) and `taskIds` so an older build still reads the row (G3).
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(kind, forKey: .kind)
+        try c.encodeIfPresent(title, forKey: .title)
+        try c.encodeIfPresent(minutes, forKey: .minutes)
+        try c.encodeIfPresent(icon, forKey: .icon)
+        try c.encodeIfPresent(taskIds.first, forKey: .taskId)
+        try c.encode(taskIds, forKey: .taskIds)
+        try c.encode(goalIds, forKey: .goalIds)
+        try c.encodeIfPresent(rewardId, forKey: .rewardId)
+        try c.encodeIfPresent(breakStartedAt, forKey: .breakStartedAt)
+        try c.encodeIfPresent(breakEndsAt, forKey: .breakEndsAt)
+        try c.encodeIfPresent(startedDevice, forKey: .startedDevice)
+        try c.encodeIfPresent(closedAt, forKey: .closedAt)
+        try c.encode(remindWhenOver, forKey: .remindWhenOver)
+        try c.encode(createdAt, forKey: .createdAt)
+    }
 }
 
 enum RewardState: Sendable, Equatable {
@@ -168,35 +205,43 @@ enum RewardState: Sendable, Equatable {
 }
 
 enum RewardRules {
-    /// plan §2.2. Break progress wins over the task's done flag: unticking a task mid-break keeps
-    /// the timer (no penalty). Only a grant that never started a break falls back to `taskDone`.
-    /// A catalog row is never unlocked.
-    static func state(of grant: RewardItem, taskDone: Bool, now: Date) -> RewardState {
+    /// plan §2.2. Break progress wins over the goals' done flags: unticking a task mid-break keeps
+    /// the timer (no penalty). Only a grant that never started a break falls back to `allGoalsDone`.
+    /// A catalog or goal row is never unlocked.
+    static func state(of grant: RewardItem, allGoalsDone: Bool, now: Date) -> RewardState {
         if grant.closedAt != nil { return .ended }
         if grant.breakStartedAt != nil {
             guard let ends = grant.breakEndsAt else { return .ended }
             return now < ends ? .running : .ended
         }
-        return (grant.kind == .grant && taskDone) ? .unlocked : .locked
+        return (grant.kind == .grant && allGoalsDone) ? .unlocked : .locked
     }
 
-    /// plan §2.3 — per task keep the newest `updatedAt` (tie: larger uuidString, deterministic) and
-    /// return the ids of the rest. Callers pass only LIVE grants (not deleted, not closed).
+    /// G2: a goal is done when it has tasks and every one is done.
+    static func isGoalDone(_ goal: RewardItem, doneTaskIds: Set<UUID>) -> Bool {
+        !goal.taskIds.isEmpty && goal.taskIds.allSatisfy { doneTaskIds.contains($0) }
+    }
+
+    /// plan §2.3 + G3 — per goalId keep the newest grant (`updatedAt`; tie: larger
+    /// uuidString, deterministic). A grant that loses on ANY of its goals is returned and gets
+    /// tombstoned whole. Callers pass only LIVE grants (not deleted, not closed).
+    // ponytail: whole-grant tombstone can also drop a loser's other, uncontested goals; splitting
+    // the grant instead is the upgrade if that ever bites.
     static func duplicateGrantIDsToTombstone(_ grants: [(item: RewardItem, updatedAt: Date)]) -> [UUID] {
         var winner: [UUID: (id: UUID, updatedAt: Date)] = [:]
         for g in grants {
-            guard let taskId = g.item.taskId else { continue }
-            if let w = winner[taskId] {
-                let newer = g.updatedAt > w.updatedAt
-                    || (g.updatedAt == w.updatedAt && g.item.id.uuidString > w.id.uuidString)
-                if newer { winner[taskId] = (g.item.id, g.updatedAt) }
-            } else {
-                winner[taskId] = (g.item.id, g.updatedAt)
+            for goalId in g.item.goalIds {
+                if let w = winner[goalId] {
+                    let newer = g.updatedAt > w.updatedAt
+                        || (g.updatedAt == w.updatedAt && g.item.id.uuidString > w.id.uuidString)
+                    if newer { winner[goalId] = (g.item.id, g.updatedAt) }
+                } else {
+                    winner[goalId] = (g.item.id, g.updatedAt)
+                }
             }
         }
         return grants.compactMap { g in
-            guard let taskId = g.item.taskId, let w = winner[taskId], w.id != g.item.id else { return nil }
-            return g.item.id
+            g.item.goalIds.contains { winner[$0]?.id != g.item.id } ? g.item.id : nil
         }
     }
 }

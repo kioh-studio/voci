@@ -12,14 +12,12 @@ struct TaskDetailIOSView: View {
     @Environment(AppState.self) private var appState
     @Environment(RewardCenter.self) private var rewardCenter
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("volar.view.goalRewards") private var goalRewardsOn = false
 
     private enum Panel { case date, time, duration, priority, reminder, repeatRule }
 
     @State private var panel: Panel?
     @State private var titleDraft = ""
     @State private var detailsDraft = ""
-    @State private var showRewardPicker = false
     @State private var confirmDelete = false
     @FocusState private var focus: Field?
     private enum Field { case title, details }
@@ -68,7 +66,6 @@ struct TaskDetailIOSView: View {
         }
         // Deleted elsewhere (sync, notification action) -> leave.
         .onChange(of: task == nil) { _, gone in if gone { dismiss() } }
-        .sheet(isPresented: $showRewardPicker) { RewardPickerSheet(taskId: taskId) }
         .confirmationDialog("Delete this task?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete task", role: .destructive) {
                 appState.deleteTask(taskId)
@@ -113,15 +110,6 @@ struct TaskDetailIOSView: View {
                 }
                 .padding(.top, 16)
 
-                if goalRewardsOn {
-                    SectionLabel("GOAL REWARDS").padding(.top, 20).padding(.bottom, 8).padding(.leading, 14)
-                    GroupedCard { goalRows(task) }
-                    Text("Unlocks when you finish this. Then it runs on a timer.")
-                        .font(IOSFont.meta)
-                        .foregroundStyle(IOSPalette.fg3)
-                        .padding(.horizontal, 14)
-                        .padding(.top, 8)
-                }
 
                 Button { confirmDelete = true } label: {
                     Text("Delete task")
@@ -213,20 +201,6 @@ struct TaskDetailIOSView: View {
                 chip("Weekly", selected: task.recurrence == .weekly) { appState.setTaskRecurrence(taskId, .weekly) }
                 chip("Monthly", selected: task.recurrence == .monthly) { appState.setTaskRecurrence(taskId, .monthly) }
             }
-        }
-    }
-
-    @ViewBuilder
-    private func goalRows(_ task: TaskItem) -> some View {
-        let grant = rewardCenter.grant(for: taskId)
-        ToggleRow(icon: "flag", title: "Today's goal", isOn: Binding(
-            get: { rewardCenter.grant(for: taskId) != nil },
-            set: { rewardCenter.setGoal(taskId, $0) }
-        ))
-        if let grant {
-            RowDivider()
-            let value = grant.title.map { t in grant.minutes.map { "\(t) · \($0)m" } ?? t } ?? "None"
-            ValueRow(icon: "gift", title: "Reward", value: value) { showRewardPicker = true }
         }
     }
 

@@ -3,52 +3,63 @@
 // UNVERIFIED: written blind on Windows, never compiled.
 import SwiftUI
 
-// MARK: - Goal task picker
+// MARK: - New goal
 
-/// "+ Add a goal": pick an open task that has no grant yet.
-struct GoalTaskPickerSheet: View {
+/// "+ New goal": a name plus one or more open tasks.
+struct GoalNewSheet: View {
     @Environment(AppState.self) private var appState
     @Environment(RewardCenter.self) private var rewardCenter
     @Environment(\.dismiss) private var dismiss
 
-    private var candidates: [TaskItem] {
-        appState.openTasks.filter { rewardCenter.grant(for: $0.id) == nil }
+    @State private var title = ""
+    @State private var selected: Set<UUID> = []
+
+    private var trimmed: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var canAdd: Bool { !trimmed.isEmpty && !selected.isEmpty }
+
+    private func add() {
+        guard canAdd else { return }
+        // Keep the task list's order rather than Set order.
+        let ids = appState.openTasks.map(\.id).filter { selected.contains($0) }
+        rewardCenter.addGoal(title: trimmed, taskIds: ids)
+        dismiss()
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            SheetHeader(title: "Pick a goal", trailing: nil, onLeading: { dismiss() })
-                .padding(.top, 8)
+            SheetHeader(
+                title: "New goal", trailing: "Add",
+                onLeading: { dismiss() }, onTrailing: add,
+                trailingEnabled: canAdd
+            )
+            .padding(.top, 8)
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Goals are just tasks. Pick one you want a reward for.")
+                    SectionLabel("Goal")
+                    TextField("Ship the landing page", text: $title)
+                        .font(IOSFont.ui(17))
+                        .foregroundStyle(IOSPalette.fg)
+                        .submitLabel(.done)
+                        .padding(.horizontal, 14)
+                        .frame(height: 48)
+                        .background(IOSPalette.bg2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(IOSPalette.border, lineWidth: 1))
+                    SectionLabel("Tasks").padding(.top, 6)
+                    Text("Pick one or more. The goal is done when all of them are.")
                         .font(IOSFont.meta)
                         .foregroundStyle(IOSPalette.fg3)
-                    if candidates.isEmpty {
-                        Text("No open tasks without a goal.")
+                    if appState.openTasks.isEmpty {
+                        Text("No open tasks.")
                             .font(IOSFont.body)
                             .foregroundStyle(IOSPalette.fg2)
                             .padding(.vertical, 8)
                     } else {
                         GroupedCard {
-                            ForEach(Array(candidates.enumerated()), id: \.element.id) { index, task in
+                            ForEach(Array(appState.openTasks.enumerated()), id: \.element.id) { index, task in
                                 if index > 0 { RowDivider(inset: 16) }
-                                Button {
-                                    rewardCenter.setGoal(task.id, true)
-                                    dismiss()
-                                } label: {
-                                    HStack {
-                                        Text(task.title)
-                                            .font(IOSFont.rowTitle)
-                                            .foregroundStyle(IOSPalette.fg)
-                                            .multilineTextAlignment(.leading)
-                                        Spacer(minLength: 8)
-                                    }
-                                    .padding(.horizontal, 16)
-                                    .frame(minHeight: 52)
-                                    .contentShape(Rectangle())
+                                selectRow(task.title, isOn: selected.contains(task.id)) {
+                                    if selected.contains(task.id) { selected.remove(task.id) } else { selected.insert(task.id) }
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -63,20 +74,46 @@ struct GoalTaskPickerSheet: View {
     }
 }
 
+/// Multi-select row: title + trailing checkmark.
+@ViewBuilder
+private func selectRow(_ title: String, isOn: Bool, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+        HStack {
+            Text(title)
+                .font(IOSFont.rowTitle)
+                .foregroundStyle(IOSPalette.fg)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 8)
+            Image(systemName: "checkmark")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(IOSPalette.mint)
+                .opacity(isOn ? 1 : 0)
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 52)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+}
+
 // MARK: - Reward picker (attach to a task)
 
 struct RewardPickerSheet: View {
-    let taskId: UUID
+    let goalId: UUID
 
-    @Environment(AppState.self) private var appState
     @Environment(RewardCenter.self) private var rewardCenter
     @Environment(\.dismiss) private var dismiss
 
     @State private var selectedId: UUID?
+    @State private var others: Set<UUID> = []
     @State private var showNew = false
 
-    private var taskTitle: String {
-        appState.tasks.first { $0.id == taskId }?.title ?? "this task"
+    private var goalTitle: String {
+        rewardCenter.goal(goalId)?.title ?? "this goal"
+    }
+
+    private var otherGoals: [RewardItem] {
+        rewardCenter.goals.filter { $0.id != goalId }
     }
 
     var body: some View {
@@ -85,14 +122,14 @@ struct RewardPickerSheet: View {
                 title: "Reward", leading: "Cancel", trailing: "Save",
                 onLeading: { dismiss() },
                 onTrailing: {
-                    rewardCenter.attachReward(selectedId, to: taskId)
+                    rewardCenter.attachReward(selectedId, toGoals: [goalId] + otherGoals.map(\.id).filter { others.contains($0) })
                     dismiss()
                 }
             )
             .padding(.top, 8)
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("What do you get after \u{201C}\(taskTitle)\u{201D}?")
+                    Text("What do you get after \u{201C}\(goalTitle)\u{201D}?")
                         .font(IOSFont.body)
                         .foregroundStyle(IOSPalette.fg2)
                     GroupedCard {
@@ -108,6 +145,20 @@ struct RewardPickerSheet: View {
                             selectedId = nil
                         }
                     }
+                    if !otherGoals.isEmpty {
+                        SectionLabel("Also needs").padding(.top, 6)
+                        GroupedCard {
+                            ForEach(Array(otherGoals.enumerated()), id: \.element.id) { index, goal in
+                                if index > 0 { RowDivider(inset: 16) }
+                                selectRow(goal.title ?? "Goal", isOn: others.contains(goal.id)) {
+                                    if others.contains(goal.id) { others.remove(goal.id) } else { others.insert(goal.id) }
+                                }
+                            }
+                        }
+                        Text("The reward unlocks when all of these are done.")
+                            .font(IOSFont.meta)
+                            .foregroundStyle(IOSPalette.fg3)
+                    }
                     HomeIndicatorSpacer()
                 }
                 .padding(.horizontal, IOSLayout.screenPadH)
@@ -116,7 +167,11 @@ struct RewardPickerSheet: View {
         }
         .iosScreenBackground()
         .preferredColorScheme(.dark)
-        .onAppear { selectedId = rewardCenter.grant(for: taskId)?.rewardId }
+        .onAppear {
+            let grant = rewardCenter.grant(forGoal: goalId)
+            selectedId = grant?.rewardId
+            others = Set((grant?.goalIds ?? []).filter { $0 != goalId })
+        }
         .sheet(isPresented: $showNew) {
             RewardNewSheet(onAdded: { selectedId = $0.id })
         }
@@ -317,8 +372,12 @@ struct RewardUnlockedSheet: View {
     @Environment(RewardCenter.self) private var rewardCenter
     @Environment(\.dismiss) private var dismiss
 
-    private var taskTitle: String {
-        appState.tasks.first { $0.id == grant.taskId }?.title ?? ""
+    private var doneLine: String {
+        if grant.goalIds.count == 1 {
+            let title = rewardCenter.goal(grant.goalIds[0])?.title ?? ""
+            return "DONE \u{00B7} \(title.uppercased())"
+        }
+        return "DONE \u{00B7} \(grant.goalIds.count) GOALS"
     }
 
     var body: some View {
@@ -330,7 +389,7 @@ struct RewardUnlockedSheet: View {
                     .foregroundStyle(IOSPalette.onMint)
             }
             .padding(.top, 28)
-            Text("DONE \u{00B7} \(taskTitle.uppercased())")
+            Text(doneLine)
                 .font(IOSFont.mono(11))
                 .foregroundStyle(IOSPalette.fg3)
                 .lineLimit(1)
@@ -385,7 +444,7 @@ struct RewardUnlockedSheet: View {
 }
 
 #Preview("Picker") {
-    RewardPickerSheet(taskId: UUID())
+    RewardPickerSheet(goalId: UUID())
         .environment(AppState())
         .environment(RewardCenter(store: nil))
 }

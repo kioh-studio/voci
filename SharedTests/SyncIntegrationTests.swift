@@ -58,10 +58,11 @@ final class SyncIntegrationTests: XCTestCase {
         // ── Device A (think: iPhone) captures a task and attaches an Earned-break reward ──
         let a = try makeDevice("A")
         let taskID = UUID()
+        let goalID = UUID() // fake goal id: only the grant row is under test here
         a.store.add(TaskItem(id: taskID, title: "Sync integration \(taskID.uuidString.prefix(8))", priority: .medium, when: .now))
         let reward = RewardItem(kind: .catalog, title: "Game", minutes: 30, icon: .gamepad)
         a.store.addReward(reward)
-        a.store.addReward(RewardItem(kind: .grant, title: "Game", minutes: 30, icon: .gamepad, taskId: taskID, rewardId: reward.id))
+        a.store.addReward(RewardItem(kind: .grant, title: "Game", minutes: 30, icon: .gamepad, goalIds: [goalID], rewardId: reward.id))
         a.engine.requestSync(reason: .localEdit)
         try await waitUntil(40, "device A pushed everything") {
             a.store.pendingForSync(limit: 10).isEmpty && a.store.pendingRewardsForSync(limit: 10).isEmpty
@@ -74,7 +75,7 @@ final class SyncIntegrationTests: XCTestCase {
             b.store.fetchAll().contains { $0.id == taskID } && b.store.fetchRewards().count == 2
         }
         XCTAssertEqual(b.store.fetchAll().first { $0.id == taskID }?.title, a.store.fetchAll().first { $0.id == taskID }?.title)
-        XCTAssertEqual(b.store.liveGrant(for: taskID)?.rewardId, reward.id, "grant arrived with its reward snapshot")
+        XCTAssertEqual(b.store.liveGrant(forGoal: goalID)?.rewardId, reward.id, "grant arrived with its reward snapshot")
 
         // ── B finishes the task; A must see it done (the "done on another device" case) ──
         b.store.toggle(taskID)
@@ -84,7 +85,7 @@ final class SyncIntegrationTests: XCTestCase {
         }
 
         // ── B starts the break; A sees the running break stamped with B's device id ──
-        if var grant = b.store.liveGrant(for: taskID) {
+        if var grant = b.store.liveGrant(forGoal: goalID) {
             grant.breakStartedAt = Date(); grant.breakEndsAt = Date().addingTimeInterval(1800)
             grant.startedDevice = b.engine.deviceId
             b.store.updateReward(grant)
@@ -93,7 +94,7 @@ final class SyncIntegrationTests: XCTestCase {
             XCTFail("device B has no live grant")
         }
         try await waitUntil(60, "device A sees the break started on B") {
-            a.store.liveGrant(for: taskID)?.startedDevice == b.engine.deviceId
+            a.store.liveGrant(forGoal: goalID)?.startedDevice == b.engine.deviceId
         }
         XCTAssertNotEqual(a.engine.deviceId, b.engine.deviceId)
 

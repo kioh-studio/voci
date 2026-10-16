@@ -18,8 +18,8 @@ No emoji, no red except Delete, no points/streaks/guilt copy.
 | D-B | Font = Geist / Geist Mono bundled in `VolarIOS/Resources/Fonts/`. `IOSFont` helpers use `Font.custom`; if the file is missing SwiftUI silently falls back to system, so nothing breaks. |
 | D-C | Native `TabView` (iOS 17 `.tabItem`) with SF Symbols (`target`, `flag`, `square.grid.2x2`) — not a hand-drawn bar. Appearance proxy tints it to the artboard. |
 | D-D | Tabs: **Now · Goals · Views**. The Goals tab exists only while the "Goal rewards" view is on (`@AppStorage("volar.view.goalRewards")`, default **false** per plan §2.3 "mặc định tắt"). Settings is pushed from Views, not a tab. |
-| D-E | A **goal** = a task that has a live grant. A grant may have no reward (`rewardId == nil`) — that is "Today's goal, no reward". |
-| D-F | Reward state is DERIVED (plan §2.2), never stored. One live grant per task. |
+| D-E | A **goal** = a task that has a live grant. A grant may have no reward (`rewardId == nil`) — that is "Today's goal, no reward". Superseded 2026-10-16: goal = named group of tasks, a grant holds 1..N goals, see `multi-goal-rewards.md`. |
+| D-F | Reward state is DERIVED (plan §2.2), never stored. One live grant per task. Multi-goal (all done => unlock): see `multi-goal-rewards.md`. |
 | D-G | Rewards live in the same SwiftData container as tasks (`RewardRecord` added to the `Schema`), CRUD in `extension TaskStore` (`RewardStore.swift`), observable state in `RewardCenter` injected via `.environment` — **AppState is not modified for rewards**. |
 | D-H | Reward sync = third stream in `sync_exchange` (`p_cursor_rewards`, `p_rewards`, response `cursorRewards`, `rewards`). Same LWW, no `sync_rejects` row. |
 | D-I | Break-end notification only on the device that started the break (`startedDevice == SyncEngine.shared.deviceId`). Plain `UNNotificationRequest`, identifier `reward-break-<grantId>`, no category. |
