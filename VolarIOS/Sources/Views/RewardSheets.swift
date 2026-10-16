@@ -75,7 +75,7 @@ struct GoalNewSheet: View {
 }
 
 /// Multi-select row: title + trailing checkmark.
-@ViewBuilder
+@MainActor @ViewBuilder
 private func selectRow(_ title: String, isOn: Bool, action: @escaping () -> Void) -> some View {
     Button(action: action) {
         HStack {
