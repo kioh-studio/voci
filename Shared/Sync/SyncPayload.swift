@@ -637,19 +637,27 @@ enum SyncDate {
         withFraction.string(from: date)
     }
 
-    /// Truncates (never rounds — rounding could carry a `.9996` up into the whole-seconds field,
-    /// which is more surgery than a wire-format quirk deserves) the first `.digits` run down to at
-    /// most 3 digits. A string with no `.` at all, or already ≤3 digits, is returned unchanged.
+    /// Normalizes the fractional-seconds run to EXACTLY 3 digits (the only shape `withFraction`
+    /// accepts): pads 1-2 digits with `0`, truncates longer runs (never rounds - rounding could carry
+    /// `.9996` up into the whole-seconds field), and inserts `.000` after the seconds when there is no
+    /// fraction at all (so `withFraction` handles it too). Postgres drops trailing zeros, so `.12` and
+    /// `.5` do occur on the wire.
     private static func truncateFractionalSeconds(_ s: String) -> String {
-        guard let dotIndex = s.firstIndex(of: ".") else { return s }
+        guard let dotIndex = s.firstIndex(of: ".") else {
+            // No fraction: insert `.000` right before the zone designator (after `hh:mm:ss`).
+            guard let tIndex = s.firstIndex(of: "T"),
+                  let zoneIndex = s[tIndex...].firstIndex(where: { $0 == "Z" || $0 == "+" || $0 == "-" })
+            else { return s }
+            return s.replacingCharacters(in: zoneIndex..<zoneIndex, with: ".000")
+        }
         let afterDot = s.index(after: dotIndex)
         var digitsEnd = afterDot
         while digitsEnd < s.endIndex, s[digitsEnd].isNumber {
             digitsEnd = s.index(after: digitsEnd)
         }
-        let digits = s[afterDot..<digitsEnd]
-        guard digits.count > 3 else { return s }
-        return s.replacingCharacters(in: afterDot..<digitsEnd, with: digits.prefix(3))
+        let digits = String(s[afterDot..<digitsEnd])
+        let fixed = String((digits + "000").prefix(3))
+        return s.replacingCharacters(in: afterDot..<digitsEnd, with: fixed)
     }
 }
 

@@ -33,7 +33,7 @@ enum TaskStoreError: Error, LocalizedError, Equatable {
         case .parentNotFound:
             return "That parent task no longer exists."
         case .parentCycle(let child, let parent):
-            return "\u{201C}\(parent)\u{201D} can't become a sub-task of \u{201C}\(child)\u{201D} — that would create a loop."
+            return "\u{201C}\(child)\u{201D} can't become a sub-task of \u{201C}\(parent)\u{201D} — that would create a loop."
         case .parentHasRecurrence(let title):
             return "\u{201C}\(title)\u{201D} repeats, so it can't have sub-tasks."
         case .recurrenceRequiresLeaf(let title):
@@ -124,7 +124,11 @@ final class TaskStore {
         // Inside `withoutStamping` too: physically removing a long-dead tombstone isn't a change
         // any other device needs to hear about "now".
         withoutStamping {
-            let cutoff = Date().addingTimeInterval(-30 * 24 * 60 * 60)
+            // ponytail: unsynced tombstones wait 365 days (never-synced users still get cleanup);
+            // a stricter rule would be "never sweep until pushed" + a sync-state check.
+            let now = Date()
+            let syncedCutoff = now.addingTimeInterval(-30 * 24 * 60 * 60)
+            let unsyncedCutoff = now.addingTimeInterval(-365 * 24 * 60 * 60)
             // Collect first, delete after — do NOT call `context.delete` while still iterating
             // `allModels`. That array is a Swift snapshot returned by `context.fetch`, so
             // walk-and-delete would likely be safe in theory, but "in theory" here means never run
@@ -132,7 +136,7 @@ final class TaskStore {
             // two passes leaves nothing left to verify — far cheaper than chasing a crash later.
             let expired = allModels.filter { model in
                 guard let deletedAt = model.deletedAt else { return false }
-                return deletedAt < cutoff
+                return deletedAt < (model.syncedAt != nil ? syncedCutoff : unsyncedCutoff)
             }
             for model in expired {
                 context.delete(model)
@@ -324,20 +328,26 @@ final class TaskStore {
     func toggle(
         _ id: UUID,
         now: Date = Date(),
-        calendar: Calendar = .current,
-        anchorRecurrenceToCompletion: Bool = false
+        calendar: Calendar = .current
     ) {
         guard let model = fetchModel(id) else { return }
         if model.status == .done {
             model.status = .todo
             model.completedAt = nil
+            // Reopening a child un-does any ancestor that was auto-completed by the cascade.
+            var visited: Set<UUID> = [model.id]
+            var cursor = model.parentId
+            while let pid = cursor, visited.insert(pid).inserted, let ancestor = fetchModel(pid) {
+                if ancestor.status == .done {
+                    ancestor.status = .todo
+                    ancestor.completedAt = nil
+                }
+                cursor = ancestor.parentId
+            }
             save()
             return
         }
-        completeCascading(
-            from: model, now: now, calendar: calendar,
-            anchorRecurrenceToCompletion: anchorRecurrenceToCompletion
-        )
+        completeCascading(from: model, now: now, calendar: calendar)
         save()
     }
 
@@ -502,16 +512,14 @@ final class TaskStore {
     /// forever (defends the walk itself, not just edge creation — `setParent` already rejects
     /// creating new cycles going forward).
     private func completeCascading(
-        from model: VolarTask, now: Date, calendar: Calendar, anchorRecurrenceToCompletion: Bool
+        from model: VolarTask, now: Date, calendar: Calendar
     ) {
         var current = model
         var visited: Set<UUID> = []
-        var anchorOverride = anchorRecurrenceToCompletion // only the task the user actually
-        // completed gets the capture-time override; cascaded parent auto-completions always
-        // reset on their own schedule.
         while visited.insert(current.id).inserted {
-            completeOne(current, now: now, calendar: calendar, anchorToCompletion: anchorOverride)
-            anchorOverride = false
+            completeOne(current, now: now, calendar: calendar)
+            // A recurring task resets to .todo — it must not drag its parent to done.
+            guard current.status == .done else { break }
             guard
                 let parentId = current.parentId,
                 let parent = fetchModel(parentId),
@@ -525,7 +533,7 @@ final class TaskStore {
 
     /// Completion for exactly one task: log + either recurrence reset-in-place or a plain
     /// `.done`.
-    private func completeOne(_ model: VolarTask, now: Date, calendar: Calendar, anchorToCompletion: Bool) {
+    private func completeOne(_ model: VolarTask, now: Date, calendar: Calendar) {
         model.completedAt = now
         if let recurrence = model.recurrence {
             // Validation rule 2 guarantees a recurring task has no children, so a parent reached
@@ -539,7 +547,6 @@ final class TaskStore {
                 deadline: model.deadline,
                 conditions: model.conditions,
                 completedAt: now,
-                anchorToCompletion: anchorToCompletion,
                 calendar: calendar
             )
             model.deadline = reset.deadline
@@ -654,6 +661,7 @@ final class TaskStore {
         model.switchAwayCount = item.switchAwayCount
         model.completedAt = item.completedAt
         model.delegation = item.delegation
+        model.cue = item.cue
         context.insert(model)
         snapshot.append(model.asTaskItem.snapshot())
         return model
@@ -813,12 +821,15 @@ extension TaskStore: SyncTaskStoring {
     /// permanent, silent data loss: the server never sends that row again. Same failure mode,
     /// opposite consequence, so it is handled oppositely on purpose — don't "clean this up" to
     /// match the other one.
-    func markSynced(_ confirmations: [UUID: Date]) {
+    func markSynced(_ confirmations: [UUID: (sent: Date, confirmed: Date)]) {
         guard !confirmations.isEmpty else { return }
         withoutStamping {
-            for (id, confirmedUpdatedAt) in confirmations {
+            for (id, c) in confirmations {
                 guard let model = fetchModelIncludingDeleted(id) else { continue }
-                model.syncedAt = Self.confirmedStamp(confirmedUpdatedAt, local: model.updatedAt)
+                // Server clamped a skewed stamp: adopt it, but only if the row is untouched since the
+                // push (`== sent`) - an edit made during the round must stay pending.
+                if model.updatedAt == c.sent && c.confirmed < c.sent { model.updatedAt = c.confirmed }
+                model.syncedAt = Self.confirmedStamp(c.confirmed, local: model.updatedAt)
             }
             save()
         }
@@ -875,6 +886,8 @@ extension TaskStore: SyncTaskStoring {
                     // `TaskItem`'s fields onto a model — `apply(_:)` already covers every field
                     // that matters here, matching how `VolarTask.apply`'s own doc comment
                     // describes itself.
+                    // Unreadable live row (no item, not a tombstone): skip rather than insert a blank task.
+                    guard entry.item != nil || entry.deletedAt != nil else { continue }
                     let model: VolarTask
                     if let item = entry.item {
                         model = VolarTask(id: entry.id, title: item.title, priority: item.priority, when: item.when)

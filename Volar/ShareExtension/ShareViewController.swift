@@ -56,8 +56,12 @@ final class ShareViewController: NSViewController {
             return
         }
 
-        context.open(url, completionHandler: nil)
-        context.completeRequest(returningItems: [], completionHandler: nil)
+        // Complete only after the host has taken the URL, or the extension can die before delivery.
+        context.open(url) { @Sendable _ in
+            _Concurrency.Task { @MainActor [weak self] in
+                self?.extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
+            }
+        }
     }
 
     // MARK: - Extraction

@@ -10,7 +10,6 @@ struct TaskDetailIOSView: View {
     let taskId: UUID
 
     @Environment(AppState.self) private var appState
-    @Environment(RewardCenter.self) private var rewardCenter
     @Environment(\.dismiss) private var dismiss
 
     private enum Panel { case date, time, duration, priority, reminder, repeatRule }
@@ -64,12 +63,13 @@ struct TaskDetailIOSView: View {
             if old == .title { commitTitle() }
             if old == .details { commitDetails() }
         }
-        // Deleted elsewhere (sync, notification action) -> leave.
+        // System back / swipe-back skips the Done button: flush pending edits (both are idempotent).
+        .onDisappear { commitTitle(); commitDetails() }
+        // Deleted (here, via sync, or a notification action) -> leave.
         .onChange(of: task == nil) { _, gone in if gone { dismiss() } }
         .confirmationDialog("Delete this task?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete task", role: .destructive) {
-                appState.deleteTask(taskId)
-                dismiss()
+                appState.deleteTask(taskId) // the `task == nil` observer dismisses
             }
             Button("Cancel", role: .cancel) {}
         }

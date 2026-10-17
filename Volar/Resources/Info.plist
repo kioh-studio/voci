@@ -78,13 +78,10 @@
 	  (no listening port). NOTE: this is declared directly in this physical Info.plist rather than
 	  via xcodegen's `target.info.properties` mechanism, because this target already sets
 	  GENERATE_INFOPLIST_FILE: NO and points INFOPLIST_FILE straight at this file (see
-	  project.yml) â€” xcodegen's `info:` block only applies when it is generating the Info.plist
+	  project.yml) — xcodegen's `info:` block only applies when it is generating the Info.plist
 	  itself, which is not this project's setup.
 
-	  Handling: as of feature 002 Phase 1, NOTHING in the app yet implements `onOpenURL`/
-	  `.onOpenURL` for this scheme â€” a hostile app registering/opening `volar://...` URLs today has
-	  no reachable code path to hit (Phase 6 per the plan). Registering the scheme now only claims
-	  it at the OS level; no handler exists yet.
+	  Handling: Shared/Orchestrator/AppLinkHandler.swift, called from `AppDelegate.application(_:open:)`.
 	-->
 	<key>CFBundleURLTypes</key>
 	<array>

@@ -205,11 +205,6 @@ struct TaskBreakdownView: View {
                 .monospacedDigit()
                 .foregroundStyle(VolarColor.textSec)
             Spacer()
-            if isSaveEnabled {
-                Text("Drag to reorder \u{00B7} click to edit")
-                    .font(.system(size: 12))
-                    .foregroundStyle(VolarColor.textMut)
-            }
         }
         .padding(.horizontal, 6)
     }
@@ -228,25 +223,6 @@ struct TaskBreakdownView: View {
     private var actions: some View {
         VStack(alignment: .trailing, spacing: 6) {
             HStack(spacing: 8) {
-                Button {
-                    // Real per-step editing lands with a later phase; for now, "Edit" just
-                    // dismisses like Cancel.
-                    onClose()
-                } label: {
-                    Text("Edit")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(VolarColor.textPri)
-                        .padding(.horizontal, 14)
-                        .frame(height: 34)
-                        // Vùng bấm phủ đúng vùng nhìn thấy (luật anh Khôi chốt 2026-08-09) — xem
-                        // `Sidebar.swift`'s `SectionHeaderRow` cho giải thích đầy đủ về họ bug này.
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .background(VolarColor.veil(0.06))
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .volarHairline(cornerRadius: 6)
-
                 Button {
                     onClose()
                 } label: {

@@ -95,7 +95,7 @@ final class SyncSensitiveTests: XCTestCase {
         // Start clean, same setup convention `SyncStoreTests` uses: simulate a confirmed push so
         // the row isn't pending purely because of the initial `add`.
         let firstPending = try XCTUnwrap(store.pendingForSync(limit: 100).first { $0.item.id == item.id })
-        store.markSynced([item.id: firstPending.updatedAt])
+        store.markSynced([item.id: (sent: firstPending.updatedAt, confirmed: firstPending.updatedAt)])
         XCTAssertTrue(store.pendingForSync(limit: 100).isEmpty)
 
         let changed = store.setSensitive(true, on: item.id)
@@ -113,7 +113,7 @@ final class SyncSensitiveTests: XCTestCase {
         store.add(item)
 
         let firstPending = try XCTUnwrap(store.pendingForSync(limit: 100).first { $0.item.id == item.id })
-        store.markSynced([item.id: firstPending.updatedAt])
+        store.markSynced([item.id: (sent: firstPending.updatedAt, confirmed: firstPending.updatedAt)])
         XCTAssertTrue(store.pendingForSync(limit: 100).isEmpty)
 
         let changed = store.setSensitive(false, on: item.id)

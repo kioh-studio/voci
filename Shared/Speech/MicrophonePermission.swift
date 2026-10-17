@@ -40,3 +40,22 @@ enum MicrophonePermission {
         await AVCaptureDevice.requestAccess(for: .audio)
     }
 }
+
+/// iOS needs an active record-capable `AVAudioSession` or the mic returns silence with no error;
+/// macOS has no such session, so both calls are no-ops there. Shared by every recording engine.
+enum RecordingAudioSession {
+    static func activate() throws {
+        #if os(iOS)
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playAndRecord, mode: .measurement, options: [.duckOthers, .defaultToSpeaker])
+        try session.setActive(true)
+        #endif
+    }
+
+    /// Best-effort: a deactivate failure is not a capture error.
+    static func deactivate() {
+        #if os(iOS)
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        #endif
+    }
+}

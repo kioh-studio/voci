@@ -39,6 +39,11 @@ final class CalendarSyncTests: XCTestCase {
         XCTAssertFalse(CalendarSync.isDesired(task), "a done task must never keep a mirrored event")
     }
 
+    func testIsDesiredExcludesArchivedTask() {
+        let task = makeTask(status: .archived, deadline: Date())
+        XCTAssertFalse(CalendarSync.isDesired(task))
+    }
+
     func testIsDesiredExcludesUndatedTask() {
         let task = makeTask(status: .todo, deadline: nil)
         XCTAssertFalse(CalendarSync.isDesired(task), "nothing to anchor an event to without a deadline")

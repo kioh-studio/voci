@@ -292,7 +292,9 @@ final class ReminderScheduler: NSObject {
     func cancelReminders(taskId: UUID) {
         let records = recordsForTask(taskId)
         guard !records.isEmpty else { return }
-        center.removePendingNotificationRequests(withIdentifiers: records.map(\.id.uuidString))
+        let ids = records.map(\.id.uuidString)
+        center.removePendingNotificationRequests(withIdentifiers: ids)
+        center.removeDeliveredNotifications(withIdentifiers: ids)
         for record in records { context.delete(record) }
         save()
         refillSystemRequests()
@@ -416,9 +418,13 @@ final class ReminderScheduler: NSObject {
     func handleAction(_ actionId: String, recordId: UUID) {
         guard let record = fetchRecord(recordId) else { return }
         let now = Date()
+        // A tap on an OS-delivered banner never went through `fire`, so the record is still
+        // "scheduled" — mark it delivered or the next rebuild re-fires it as a duplicate.
+        if record.state == "scheduled" { record.state = "delivered" }
         switch actionId {
         case ReminderAction.done:
             let taskId = record.taskId
+            center.removeDeliveredNotifications(withIdentifiers: [record.id.uuidString])
             store.toggle(taskId, now: now)
             record.state = "satisfied"
             // WG-C (FR-020 gap fix): this path deliberately bypasses `AppState.toggleDone` (its own
@@ -929,7 +935,9 @@ final class ReminderScheduler: NSObject {
         do {
             try context.save()
         } catch {
+            #if DEBUG
             print("[Volar.ReminderScheduler] save failed: \(error)")
+            #endif
         }
     }
 }

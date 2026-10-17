@@ -56,7 +56,7 @@ actor Entitlements {
     /// is spelled out explicitly even though it's the default for a plain actor's `static let`.
     nonisolated static let shared = Entitlements()
 
-    private static let baseURL = URL(string: "https://cjaamylayaylbuuhwlnz.supabase.co")!
+    private static let baseURL = ConfigParseCredentialProvider.defaultBaseURL
 
     /// UserDefaults (NOT Keychain — this is cached DERIVED state, "free"/"pro", never a
     /// credential) snapshot of the last known tier, so `EnvironmentGroqCredentialProvider

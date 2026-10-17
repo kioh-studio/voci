@@ -33,6 +33,10 @@ final class AppLinkHandler {
     /// wiring is complete is logged and dropped, never silently guessed at or force-unwrapped.
     var onCapture: ((_ text: String, _ source: String?) -> Void)?
 
+    /// When the last capture link was accepted — a second one within 2 s is dropped so a link
+    /// that fires repeatedly (or a hostile page looping it) can't spam the parse pipeline.
+    private var lastCaptureAt: Date?
+
     init(store: TaskStore) {
         self.store = store
     }
@@ -85,6 +89,12 @@ final class AppLinkHandler {
             log("capture link received before the capture pipeline hook was wired — dropped")
             return
         }
+        let now = Date()
+        if let last = lastCaptureAt, now.timeIntervalSince(last) < 2 {
+            log("capture link arrived < 2 s after the previous one — ignored")
+            return
+        }
+        lastCaptureAt = now
         let source = params["source"].map { String($0.prefix(200)) }
         onCapture(text, source)
     }

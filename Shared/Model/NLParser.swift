@@ -304,7 +304,7 @@ struct HeuristicNLParser: NLParser {
 
         let title = Self.cleanTitle(from: workingText)
         let priority = Self.detectPriority(in: workingText)
-        let estimateMinutes = Self.detectEstimate(in: workingText)
+        let estimateMinutes = Self.detectEstimate(in: workingText, excluding: Self.reminderIntervalRange(in: workingText))
         let recurrence = Self.detectRecurrence(in: workingText)
         let reminderOverride = Self.detectReminderOverride(in: workingText)
         let kind = Self.detectKind(in: workingText)
@@ -393,12 +393,7 @@ struct HeuristicNLParser: NLParser {
 
     // MARK: - Estimate ("45 min", "1 hr", "nửa tiếng", "~30 phút", "chắc 30 phút")
 
-    // UNVERIFIED: no-op if the pinned SDK marks these Sendable — `nonisolated(unsafe)` matches
-    // this codebase's own convention for caching non-Sendable system types in a `static let`
-    // (see `SpeechCapture.swift:198`'s `nonisolated(unsafe) let tapRequest`); under Swift 6
-    // strict concurrency, `NSRegularExpression`/`NSDataDetector` statics are otherwise flagged
-    // "not concurrency-safe" even though both are immutable-after-init and safe to share.
-    nonisolated(unsafe) private static let estimateRegex = try? NSRegularExpression(
+    private static let estimateRegex = try? NSRegularExpression(
         pattern: #"(\d+)\s*(minutes?|mins?|hours?|hrs?|phút|tiếng|giờ)"#,
         options: [.caseInsensitive]
     )
@@ -411,7 +406,9 @@ struct HeuristicNLParser: NLParser {
         return Self.hedgeWords.contains { context.contains($0) }
     }
 
-    private static func detectEstimate(in text: String) -> ParsedValue<Int>? {
+    /// `excluding`: range of the reminder-cadence phrase ("remind me every 30 minutes") — a
+    /// duration match inside it is the cadence, not an estimate.
+    private static func detectEstimate(in text: String, excluding: NSRange? = nil) -> ParsedValue<Int>? {
         let lower = text.lowercased()
 
         // Fixed-phrase table first — these don't carry an explicit digit for the regex below.
@@ -434,7 +431,9 @@ struct HeuristicNLParser: NLParser {
         // Unicode input, so a `Range<String.Index>` produced against one string is not safely
         // reusable against the other; staying entirely in `lower`'s index space avoids that trap.
         let nsLower = lower as NSString
-        guard let match = regex.firstMatch(in: lower, range: NSRange(location: 0, length: nsLower.length)),
+        let found = regex.matches(in: lower, range: NSRange(location: 0, length: nsLower.length))
+            .first { m in excluding.map { NSIntersectionRange(m.range, $0).length == 0 } ?? true }
+        guard let match = found,
               match.range(at: 1).location != NSNotFound,
               match.range(at: 2).location != NSNotFound
         else { return nil }
@@ -458,7 +457,7 @@ struct HeuristicNLParser: NLParser {
         var isExplicitTime: Bool
     }
 
-    nonisolated(unsafe) private static let dateDetector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
+    private static let dateDetector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
 
     /// Vietnamese + English weekday keywords → `Calendar.component(.weekday)` values
     /// (Sunday = 1 ... Saturday = 7, matching `Calendar`'s own convention).
@@ -525,7 +524,7 @@ struct HeuristicNLParser: NLParser {
 
     // MARK: - Defer phrasing → ParsedCondition.afterDate
 
-    nonisolated(unsafe) private static let deferCueRegex = try? NSRegularExpression(
+    private static let deferCueRegex = try? NSRegularExpression(
         pattern: #"\bstart(?:ing)?\s+(?:on\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|next\s+week)\b"#,
         options: [.caseInsensitive]
     )
@@ -559,7 +558,7 @@ struct HeuristicNLParser: NLParser {
 
     // MARK: - Dependency phrasing → ParsedCondition.taskDone
 
-    nonisolated(unsafe) private static let dependencyPatterns: [NSRegularExpression] = [
+    private static let dependencyPatterns: [NSRegularExpression] = [
         #"(?:after|once)\s+(.+?)\s+is\s+done"#,
         #"when\s+(.+?)\s+is\s+done"#,
         #"sau\s+khi\s+(.+?)\s+xong"#,
@@ -602,7 +601,7 @@ struct HeuristicNLParser: NLParser {
 
     // MARK: - Wait phrasing → ParsedCondition.external
 
-    nonisolated(unsafe) private static let externalPatterns: [NSRegularExpression] = [
+    private static let externalPatterns: [NSRegularExpression] = [
         #"waiting\s+(?:for|on)\s+(.+?)(?=,|\.|$)"#,
         #"(?:chờ|đợi)\s+(.+?)(?=,|\.|$)"#
     ].compactMap { try? NSRegularExpression(pattern: $0, options: [.caseInsensitive]) }
@@ -618,7 +617,7 @@ struct HeuristicNLParser: NLParser {
 
     // MARK: - Recurrence
 
-    nonisolated(unsafe) private static let everyNDaysRegex = try? NSRegularExpression(
+    private static let everyNDaysRegex = try? NSRegularExpression(
         pattern: #"(?:every|mỗi|cứ)\s+(\d+)\s+(?:days?|ngày)"#,
         options: [.caseInsensitive]
     )
@@ -652,10 +651,15 @@ struct HeuristicNLParser: NLParser {
 
     // MARK: - Reminder override ("remind me every 30 minutes", "nhắc mỗi 30 phút")
 
-    nonisolated(unsafe) private static let reminderIntervalRegex = try? NSRegularExpression(
+    private static let reminderIntervalRegex = try? NSRegularExpression(
         pattern: #"(?:remind(?:\s+me)?(?:\s+every)?|nhắc(?:\s+lại)?\s+mỗi)\s+(\d+)\s*(minutes?|mins?|hours?|hrs?|phút|giờ)"#,
         options: [.caseInsensitive]
     )
+
+    private static func reminderIntervalRange(in text: String) -> NSRange? {
+        guard let regex = Self.reminderIntervalRegex else { return nil }
+        return regex.firstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length))?.range
+    }
 
     private static func detectReminderOverride(in text: String) -> ParsedValue<ReminderPolicy>? {
         let lower = text.lowercased()

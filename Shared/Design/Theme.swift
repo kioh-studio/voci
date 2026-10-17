@@ -216,8 +216,8 @@ struct Accent: Sendable {
 
 /// Selectable accent families (`VOLAR_ACCENTS`). Default is `.indigo`, whose NAME is now a
 /// misnomer kept for wire/settings compatibility (it is persisted by rawValue): as of RETHEME 4 it
-/// resolves to Apple's `systemPurple` accessible family (design.md §1/§3.3) — the app's one and
-/// only saturated hue, used sparingly (a 3px bar, a small chip), never a large fill.
+/// resolves to Apple's systemMint accessible family (the app's one saturated hue, see the `.indigo`
+/// case below), used sparingly (a 3px bar, a small chip), never a large fill.
 ///
 /// `.teal`/`.amber`/`.magenta` keep their original dark-mode hue unchanged and gain a light-mode
 /// pair computed by lowering HSL lightness ~25% at the same hue/saturation (design.md §3.3: "opt-

@@ -18,6 +18,7 @@ struct SettingsIOSView: View {
     @State private var accountEmailInput = ""
     @State private var accountCodeInput = ""
     @State private var accountCodeSent = false
+    @State private var sendingCode = false
     @State private var showDeleteAccountConfirm = false
     @State private var showSyncEnableSheet = false
     @State private var showSyncRejects = false
@@ -65,8 +66,8 @@ struct SettingsIOSView: View {
         } message: {
             Text("Your tasks on THIS iPhone (and every other signed-in device) are not touched — this only clears the server-side copy. Sync will start re-uploading from whatever devices are still syncing.")
         }
-        .sheet(isPresented: $showSyncEnableSheet) { SyncEnableSheet() }
-        .sheet(isPresented: $showSyncRejects) { SyncRejectsView() }
+        .sheet(isPresented: $showSyncEnableSheet) { SyncEnableSheet().presentationDetents([.medium, .large]) }
+        .sheet(isPresented: $showSyncRejects) { SyncRejectsView().presentationDetents([.medium, .large]) }
         .onAppear { appState.refreshSyncState() }
         .task { await loadNotificationStatus() }
     }
@@ -134,10 +135,12 @@ struct SettingsIOSView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.emailAddress)
+                    .textContentType(.emailAddress)
                 Button("Send code") {
-                    accountCodeSent = true
+                    sendingCode = true
                     appState.sendEmailOTP(email: accountEmailInput)
                 }
+                .buttonStyle(.borderless)
                 .font(IOSFont.meta)
                 .foregroundStyle(IOSPalette.mint)
                 .disabled(appState.accountBusy || accountEmailInput.isEmpty)
@@ -150,15 +153,23 @@ struct SettingsIOSView: View {
                         .font(IOSFont.body)
                         .foregroundStyle(IOSPalette.fg)
                         .keyboardType(.numberPad)
+                        .textContentType(.oneTimeCode)
                     Button("Verify") {
                         appState.verifyEmailOTP(email: accountEmailInput, code: accountCodeInput)
                     }
+                    .buttonStyle(.borderless)
                     .font(IOSFont.meta)
                     .foregroundStyle(IOSPalette.mint)
                     .disabled(appState.accountBusy || accountCodeInput.count != 6)
                 }
                 .frame(minHeight: IOSLayout.minTouch)
             }
+        }
+        // `sendEmailOTP` is fire-and-forget: reveal the code field only once it finished without error.
+        .onChange(of: appState.accountBusy) { _, busy in
+            guard !busy, sendingCode else { return }
+            sendingCode = false
+            if appState.accountError == nil { accountCodeSent = true }
         }
     }
 
@@ -477,10 +488,10 @@ struct SettingsIOSView: View {
                         .fill(candidate.accent.solid)
                         .frame(width: 28, height: 28)
                         .overlay(Circle().stroke(selected ? IOSPalette.fg : IOSPalette.border, lineWidth: selected ? 2 : 1))
+                        .frame(width: IOSLayout.minTouch, height: IOSLayout.minTouch)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .frame(width: IOSLayout.minTouch, height: IOSLayout.minTouch)
-                .contentShape(Rectangle())
             }
         }
     }
@@ -584,16 +595,13 @@ struct SettingsIOSView: View {
                     meta("Off by default — Volar recognizes speech on-device only. Turning this on lets Apple's servers transcribe when on-device recognition isn't available; audio then leaves this iPhone.")
                 }
                 Spacer(minLength: 8)
-                // `allowServerRecognition` is private(set); the only way to flip it is
-                // `useServerRecognition()`, which also starts a capture (no way back to off).
-                if appState.allowServerRecognition {
-                    meta("On")
-                } else {
-                    Button("Enable") { appState.useServerRecognition() }
-                        .font(IOSFont.meta)
-                        .foregroundStyle(IOSPalette.mint)
-                        .frame(minHeight: IOSLayout.minTouch)
-                }
+                // `setAllowServerRecognition` flips the flag alone (no capture is started).
+                Toggle("Server-based recognition", isOn: Binding(
+                    get: { appState.allowServerRecognition },
+                    set: { appState.setAllowServerRecognition($0) }
+                ))
+                .labelsHidden()
+                .tint(IOSPalette.mint)
             }
             .frame(minHeight: IOSLayout.minTouch)
         } header: {

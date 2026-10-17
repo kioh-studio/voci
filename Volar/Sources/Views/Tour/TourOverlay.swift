@@ -351,6 +351,7 @@ struct TourOverlay: View {
                 .foregroundStyle(VolarColor.textPri)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .volarHairline(cornerRadius: 8)

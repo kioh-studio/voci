@@ -40,7 +40,7 @@ actor AccountService {
     /// per-instance dependency threaded through every one of those call sites.
     nonisolated static let shared = AccountService()
 
-    private static let baseURL = URL(string: "https://cjaamylayaylbuuhwlnz.supabase.co")!
+    private static let baseURL = ConfigParseCredentialProvider.defaultBaseURL
     /// Publishable key, contract §2 — NOT a secret (same reasoning as
     /// `ConfigParseCredentialProvider.defaultBaseURL`'s doc comment: every client of a Supabase
     /// project embeds its project's public anon/publishable key; only the service-role key is

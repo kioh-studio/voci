@@ -99,7 +99,7 @@ final class CalendarAccess {
             // `EKEventStore` across isolation under Swift 6; this call stays on the main actor.
             let store = eventStore
             let granted: Bool = try await withCheckedThrowingContinuation { continuation in
-                store.requestFullAccessToEvents { ok, error in
+                store.requestFullAccessToEvents { @Sendable ok, error in
                     if let error { continuation.resume(throwing: error) } else { continuation.resume(returning: ok) }
                 }
             }

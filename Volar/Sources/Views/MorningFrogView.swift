@@ -90,6 +90,7 @@ struct MorningFrogView: View {
             .foregroundStyle(accentColors.solid)
             .padding(.horizontal, 22)
             .frame(height: 48)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .background(accentColors.surface)

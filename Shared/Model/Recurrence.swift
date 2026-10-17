@@ -97,6 +97,23 @@ struct ReminderPolicy: Sendable, Equatable {
     )
 }
 
+extension ReminderPolicy {
+    /// Preset repeat cadences (seconds) for the reminder editors.
+    static let repeatPresets: [TimeInterval] = [900, 1800, 3600, 7200, 14400, 86400]
+
+    static func repeatLabel(_ seconds: TimeInterval) -> String {
+        switch seconds {
+        case 900: return "15m"
+        case 1800: return "30m"
+        case 3600: return "1h"
+        case 7200: return "2h"
+        case 14400: return "4h"
+        case 86400: return "1 day"
+        default: return "\(Int(seconds / 60))m"
+        }
+    }
+}
+
 extension ReminderPolicy: Codable {
     private enum CodingKeys: String, CodingKey {
         case offsets, repeatEvery, fractionsRemaining, remindPeriod
@@ -184,9 +201,8 @@ enum RecurrenceEngine {
     }
 
     /// Completion -> reset-in-place: reopen at the next occurrence. Schedule-anchored by default
-    /// (weekly-Monday stays Monday no matter which weekday it was actually completed);
-    /// `anchorToCompletion` re-anchors this ONE cycle to `completedAt` instead (the capture-time
-    /// "starting from today" override, FR-006). `.afterDate` conditions shift by the same rule,
+    /// (weekly-Monday stays Monday no matter which weekday it was actually completed).
+    /// `.afterDate` conditions shift by the same rule,
     /// each from its own prior date; `.external` conditions reset to unsatisfied (a fresh cycle
     /// re-waits on whatever it was waiting on); `.taskDone` conditions are left untouched — a
     /// recurring task's cross-task prerequisites don't reset with its own schedule.
@@ -195,7 +211,6 @@ enum RecurrenceEngine {
         deadline: Date?,
         conditions: [VolarCore.Condition],
         completedAt: Date,
-        anchorToCompletion: Bool,
         calendar: Calendar
     ) -> Reset {
         // FIX E: a single `advance(anchor, ...)` call only moves ONE period past the old
@@ -208,11 +223,12 @@ enum RecurrenceEngine {
         // `advance`'s own defensive-guard philosophy above) against a pathological/corrupted rule
         // that would otherwise spin — e.g. `advance` returning the same instant it was given.
         func nextOccurrence(from original: Date) -> Date {
-            let anchor = anchorToCompletion ? completedAt : original
-            var candidate = anchor
+            var candidate = original
             var iterations = 0
             let maxIterations = 1000
-            while candidate <= completedAt, iterations < maxIterations {
+            // Advance at least once (a task completed EARLY has original > completedAt and must
+            // still move to the next cycle), then keep going until strictly after `completedAt`.
+            while iterations == 0 || (candidate <= completedAt && iterations < maxIterations) {
                 // If advancing ever fails (defensive — see `advance`'s doc comment), stop and fall
                 // back to the last good candidate rather than producing `nil`/crashing; a
                 // stuck-in-place recurring task is a visible, recoverable bug, not a crash.
@@ -226,10 +242,8 @@ enum RecurrenceEngine {
         let nextDeadline: Date?
         if let deadline {
             nextDeadline = nextOccurrence(from: deadline)
-        } else if anchorToCompletion {
-            nextDeadline = advance(completedAt, by: recurrence, calendar: calendar)
         } else {
-            // No prior schedule to anchor to and no override — stays undated; only its
+            // No prior schedule to anchor to — stays undated; only its
             // `.afterDate`/`.external` conditions (if any) gate the next cycle.
             nextDeadline = nil
         }

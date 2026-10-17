@@ -1,7 +1,7 @@
 // Sources/Views/Components.swift — shared components (frozen §5): KeyBadge, PriorityBadge,
-// TimeBadge, Spinner, ToolButton, SectionHeader. GlassBackground itself lives in Design/Glass.swift.
+// TimeBadge, Spinner, SectionHeader. GlassBackground itself lives in Design/Glass.swift.
 //
-// KeyBadge/TimeBadge/ToolButton/SectionHeader read the active accent from `@Environment(AppState.self)`
+// KeyBadge/TimeBadge/SectionHeader read the active accent from `@Environment(AppState.self)`
 // (so their frozen init signatures don't need an extra color parameter). `VolarApp.swift` injects
 // `AppState` via `.environment(appState)` at the Window/MenuBarExtra root, so any Phase-2 view
 // mounted inside those scenes gets it for free. Standalone `#Preview`s of these components must
@@ -29,11 +29,8 @@ func rankReasonLabel(_ reason: RankReason) -> String? {
     }
 }
 
-/// Chấm màu + nhãn của `Priority`. Bốn chỗ trong app đã tự viết lại đúng hai `switch` này
-/// (`TaskRow`, `FocusOverlay`, `TaskDetailView`, `PopoverView`), mỗi chỗ một bản `private` —
-/// `TodayView`'s NOW card là chỗ thứ năm, và nó dừng ở đây. Bốn bản kia cố ý KHÔNG đụng tới trong
-/// lần này: chúng đang chạy đúng, và đổi bốn file để gom một `switch` ba nhánh là mở rộng phạm vi
-/// của một thay đổi UI thành một đợt refactor. Ghi trong backlog để gom nốt khi có dịp.
+/// Chấm màu + nhãn của `Priority`. `TaskRow` và `TodayView`'s NOW card dùng bản này; `FocusOverlay`,
+/// `TaskDetailView`, `PopoverView` vẫn còn bản `private` riêng (chạy đúng, chưa gom).
 func priorityTint(_ priority: Priority) -> Color {
     switch priority {
     case .high: return VolarColor.high
@@ -236,61 +233,6 @@ struct Spinner: View {
                     isSpinning = true
                 }
             }
-    }
-}
-
-/// Small square icon button used in the title bar / sidebar. Ported from `volar-mac.jsx`'s
-/// `ToolButton` (`accent` = solid accent fill, `tint` = accent-tinted "activeTint" state).
-struct ToolButton: View {
-    let icon: VolarIconName
-    var accent: Bool
-    var tint: Bool
-    let action: () -> Void
-
-    @Environment(AppState.self) private var appState: AppState
-    @State private var isHovering = false
-
-    init(icon: VolarIconName, accent: Bool = false, tint: Bool = false, action: @escaping () -> Void) {
-        self.icon = icon
-        self.accent = accent
-        self.tint = tint
-        self.action = action
-    }
-
-    private var accentColors: Accent { appState.accent.accent }
-
-    private var foreground: Color {
-        if accent { return .white }
-        if tint { return accentColors.solid }
-        return VolarColor.textSec
-    }
-
-    private var background: Color {
-        if accent { return isHovering ? accentColors.hover : accentColors.solid }
-        if tint { return accentColors.surface }
-        return isHovering ? VolarColor.veil(0.06) : .clear
-    }
-
-    var body: some View {
-        Button(action: action) {
-            VolarIcon(icon, size: 14, color: foreground, weight: .regular)
-                .frame(width: 28, height: 28)
-        }
-        .buttonStyle(ToolButtonStyle())
-        .background(background)
-        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-        .onHover { isHovering = $0 }
-        .animation(VolarMotion.hover, value: isHovering)
-    }
-}
-
-/// Subtle press-down scale for `ToolButton`, layered via `ButtonStyle` so it composes with the
-/// existing hover-driven background/foreground without a second competing gesture recognizer.
-private struct ToolButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.96 : 1)
-            .animation(VolarMotion.press, value: configuration.isPressed)
     }
 }
 

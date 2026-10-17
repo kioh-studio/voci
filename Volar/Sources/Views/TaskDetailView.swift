@@ -457,25 +457,15 @@ private struct TaskDetailEditor: View {
         )
     }
 
-    private static let durationPresets = [5, 10, 15, 30, 45, 60, 90, 120, 180, 240]
-
     private var durationBufferLabel: String {
         guard let durationBuffer, durationBuffer > 0 else { return "Add duration" }
-        return Self.durationPresetLabel(durationBuffer)
-    }
-
-    private static func durationPresetLabel(_ minutes: Int) -> String {
-        if minutes < 60 { return "\(minutes) min" }
-        let hours = minutes / 60
-        let remainder = minutes % 60
-        if remainder == 0 { return hours == 1 ? "1 hr" : "\(hours) hrs" }
-        return "\(hours)h \(remainder)m"
+        return TaskItem.durationLabel(minutes: durationBuffer)
     }
 
     private var durationMenu: some View {
         Menu {
-            ForEach(Self.durationPresets, id: \.self) { minutes in
-                Button(Self.durationPresetLabel(minutes)) {
+            ForEach(TaskItem.durationPresetMinutes, id: \.self) { minutes in
+                Button(TaskItem.durationLabel(minutes: minutes)) {
                     durationBuffer = minutes
                     commitIfChanged()
                 }
@@ -494,26 +484,9 @@ private struct TaskDetailEditor: View {
         .fixedSize()
     }
 
-    /// Preset cadences (seconds) — same list `PopoverView`'s confirm-card reminder editor uses
-    /// (manual-edit-contract.md §3), kept in sync by eye since the two files are file-disjoint
-    /// (owned by different agents) and neither exposes a shared constant to the other.
-    private static let remindPeriodPresets: [TimeInterval] = [900, 1800, 3600, 7200, 14400, 86400]
-
-    private static func remindPeriodLabel(_ seconds: TimeInterval) -> String {
-        switch seconds {
-        case 900: return "15m"
-        case 1800: return "30m"
-        case 3600: return "1h"
-        case 7200: return "2h"
-        case 14400: return "4h"
-        case 86400: return "1 day"
-        default: return "\(Int(seconds / 60))m"
-        }
-    }
-
     private var remindPeriodBufferLabel: String {
         guard let remindPeriodBuffer else { return "Add reminder" }
-        return "Remind \(Self.remindPeriodLabel(remindPeriodBuffer))"
+        return "Remind \(ReminderPolicy.repeatLabel(remindPeriodBuffer))"
     }
 
     /// "Default reminders" sets the buffer back to `nil` — per manual-edit-contract.md §1.1/§1.4
@@ -521,8 +494,8 @@ private struct TaskDetailEditor: View {
     /// `fractionsRemaining` proportional reminders rather than clearing reminders outright.
     private var remindPeriodMenu: some View {
         Menu {
-            ForEach(Self.remindPeriodPresets, id: \.self) { seconds in
-                Button(Self.remindPeriodLabel(seconds)) {
+            ForEach(ReminderPolicy.repeatPresets, id: \.self) { seconds in
+                Button(ReminderPolicy.repeatLabel(seconds)) {
                     remindPeriodBuffer = seconds
                     commitIfChanged()
                 }
@@ -642,8 +615,11 @@ private struct TaskDetailEditor: View {
                 appState.removeTaskDependency(task.id, at: index)
             } label: {
                 VolarIcon(.x, size: 9, color: VolarColor.textMut)
+                    .padding(4)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Remove condition")
         }
     }
 

@@ -191,6 +191,7 @@ private struct TriageRow: View {
                 .foregroundStyle(VolarColor.textPri)
                 .frame(maxWidth: .infinity)
                 .frame(height: 28)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .background(VolarColor.veil(0.06))

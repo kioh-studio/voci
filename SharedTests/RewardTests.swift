@@ -81,7 +81,7 @@ final class RewardTests: XCTestCase {
         store.addReward(a)
         store.addReward(b)
         let pa = try XCTUnwrap(store.pendingRewardsForSync(limit: 10).first { $0.item.id == a.id })
-        store.markRewardsSynced([a.id: pa.updatedAt])
+        store.markRewardsSynced([a.id: (sent: pa.updatedAt, confirmed: pa.updatedAt)])
         XCTAssertNil(store.pendingRewardsForSync(limit: 10).first { $0.item.id == a.id })
         XCTAssertNotNil(store.pendingRewardsForSync(limit: 10).first { $0.item.id == b.id })
         store.deleteReward(a.id)
@@ -182,10 +182,13 @@ final class RewardTests: XCTestCase {
 
     func testIsGoalDone() {
         let a = UUID(), b = UUID()
-        XCTAssertFalse(RewardRules.isGoalDone(RewardItem(kind: .goal, taskIds: []), doneTaskIds: [a]))
+        XCTAssertFalse(RewardRules.isGoalDone(RewardItem(kind: .goal, taskIds: []), doneTaskIds: [a], knownTaskIds: [a]))
         let goal = RewardItem(kind: .goal, taskIds: [a, b])
-        XCTAssertFalse(RewardRules.isGoalDone(goal, doneTaskIds: [a]))
-        XCTAssertTrue(RewardRules.isGoalDone(goal, doneTaskIds: [a, b]))
+        XCTAssertFalse(RewardRules.isGoalDone(goal, doneTaskIds: [a], knownTaskIds: [a, b]))
+        XCTAssertTrue(RewardRules.isGoalDone(goal, doneTaskIds: [a, b], knownTaskIds: [a, b]))
+        // A deleted task (not in knownTaskIds) no longer blocks the goal; none known -> not done.
+        XCTAssertTrue(RewardRules.isGoalDone(goal, doneTaskIds: [a], knownTaskIds: [a]))
+        XCTAssertFalse(RewardRules.isGoalDone(goal, doneTaskIds: [], knownTaskIds: []))
     }
 
     func testCenterStateNeedsEveryGoalDoneAndResolved() throws {

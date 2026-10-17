@@ -781,6 +781,9 @@ final class AppState {
     /// showing the "no matching task" row.
     var voiceDoneNoMatchTranscript: String?
     private(set) var captureErrorDetail: String?
+    /// True when the last capture error was a denied microphone/speech permission (so a view can
+    /// offer "Open Settings"). Reset when a capture starts.
+    private(set) var captureErrorIsPermission = false
     /// User consented to Apple server-based recognition (audio leaves the Mac). Persisted.
     private(set) var allowServerRecognition: Bool
     /// Speech-recognition language, as a BCP-47/locale identifier (e.g. "en-US", "vi-VN") or the
@@ -1009,11 +1012,8 @@ final class AppState {
     /// here with a real `cloudGate:` (`DefaultCloudParseGate`, bottom of this file) so the
     /// Local↔Cloud choice this file owns
     /// (`parseEnginePreference` / `cloudParseConsent` / `resolveCloudConsent`) reaches the router.
-    /// `cloud:` is now wired with `ConfigParseCredentialProvider` (a placeholder credential source):
-    /// the Cloud tier is fully connected and user-switchable from Settings, but stays inert
-    /// (falls back to on-device) until a parse-proxy base URL + token are configured — "code first,
-    /// key later". The real StoreKit paid-JWS + `DeviceCheckProvider.swift` free-token composite
-    /// (Phase 8/T051) supersedes that placeholder when it lands.
+    /// `cloud:` is wired with `ConfigParseCredentialProvider`, which hands the router the signed-in
+    /// Supabase bearer token (single-bearer contract; the old free-tier DeviceCheck path is gone).
     private let router: IntentRouter
     private let store: TaskStore?
     /// Injected clock so `activeTask` stays pure/testable instead of reading the wall clock
@@ -1209,7 +1209,7 @@ final class AppState {
 
     /// Called at the end of `confirmSave`'s success paths with the tasks that save created.
     private func recordOfflineCaptureIfNeeded(_ items: [TaskItem]) {
-        guard lastParseRoute == .titleOnly, offlineCapture?.isOnline == false,
+        guard lastParseRoute == .titleOnly,
               let transcript = items.first?.sourceTranscript else { return }
         offlineCapture?.recordOfflineSave(taskIds: items.map(\.id), transcript: transcript)
     }
@@ -1534,6 +1534,11 @@ final class AppState {
         // `proceedToCapture`'s frozen-adjacent signature. // UNVERIFIED
         appLinkHandler?.onCapture = { [weak self] text, source in
             guard let self else { return }
+            // A deep link must not hijack an in-flight voice/typed capture.
+            guard self.captureState == .idle, self.textCapture == .closed else {
+                NSLog("Volar: ignored volar://capture while a capture is already open")
+                return
+            }
             let transcript = source.map { "\(text) (via \($0))" } ?? text
             self.proceedToCapture(transcript: transcript)
         }
@@ -1582,13 +1587,31 @@ final class AppState {
         #elseif os(iOS)
         let didBecomeActiveName = UIApplication.didBecomeActiveNotification
         #endif
-        NotificationCenter.default.addObserver(
+        observerTokens.append(NotificationCenter.default.addObserver(
             forName: didBecomeActiveName, object: nil, queue: .main
         ) { @Sendable [weak self] _ in
             _Concurrency.Task { @MainActor in
                 self?.recordAppBecameActive()
             }
-        }
+        })
+        // `ReminderScheduler` posts `.volarTasksDidChange` after a store mutation made from the
+        // notification path (which may not touch AppState directly); catch `tasks` back up here, for
+        // both platforms (this used to live in the macOS-only `VolarApp.swift`).
+        observerTokens.append(NotificationCenter.default.addObserver(
+            forName: .volarTasksDidChange, object: nil, queue: .main
+        ) { @Sendable [weak self] _ in
+            _Concurrency.Task { @MainActor in
+                self?.refreshFromStore()
+            }
+        })
+    }
+
+    /// Observer tokens registered in `init`. `nonisolated(unsafe)` only so `deinit` can remove them;
+    /// written solely from `init` and read solely from `deinit`.
+    @ObservationIgnored nonisolated(unsafe) private var observerTokens: [any NSObjectProtocol] = []
+
+    deinit {
+        observerTokens.forEach(NotificationCenter.default.removeObserver)
     }
 
     // MARK: - Account & Entitlements actions
@@ -1652,6 +1675,7 @@ final class AppState {
                 self.accountEmail = user.email
                 await Entitlements.shared.relinkCurrentEntitlements()
                 self.refreshAccountState()
+                self.refreshSyncState()
             } catch {
                 self.accountError = (error as? LocalizedError)?.errorDescription ?? "\(error)"
             }
@@ -1670,6 +1694,9 @@ final class AppState {
             self.accountTier = .free
             self.subscriptionStatus = nil
             self.accountError = nil
+            await SyncAccountClient.shared.clearCache()
+            SyncEngine.shared.resyncFromScratch()
+            self.refreshSyncState()
         }
     }
 
@@ -1689,6 +1716,9 @@ final class AppState {
                 self.accountTier = .free
                 self.subscriptionStatus = nil
                 self.accountError = nil
+                await SyncAccountClient.shared.clearCache()
+                SyncEngine.shared.resyncFromScratch()
+                self.refreshSyncState()
             } catch {
                 self.accountError = (error as? LocalizedError)?.errorDescription ?? "\(error)"
             }
@@ -1821,6 +1851,7 @@ final class AppState {
             defer { self.syncStateLoaded = true }
             do {
                 self.syncState = try await SyncAccountClient.shared.fetchState()
+                self.syncError = nil
             } catch {
                 self.syncError = Self.syncFailureMessage(error)
             }
@@ -2151,6 +2182,7 @@ final class AppState {
             if let index = tasks.firstIndex(where: { $0.id == id }) {
                 tasks[index].status = .archived
             }
+            syncCalendarMirror()
             return
         }
         let before = tasks
@@ -2160,8 +2192,9 @@ final class AppState {
             return updated
         }
         tasks = store.fetchAll()
-        scheduler?.scheduleReminders(taskId: id)
+        scheduler?.cancelReminders(taskId: id)
         notifyEligibilityAndScheduleResurface(before: before, now: clock())
+        syncCalendarMirror()
     }
 
     /// Số việc đã xong — cùng nguồn `doneTasks` mà section Completed hiển thị, không đếm riêng.
@@ -2410,15 +2443,16 @@ final class AppState {
     /// exact `tasks = store.fetchAll()` refresh every other store-backed mutation above already
     /// does — no-op (not an error) when there's no store, same as every other no-store fallback in
     /// this file.
-    func refreshFromStore() {
+    func refreshFromStore(notifySync: Bool = true) {
         guard let store else { return }
         tasks = store.fetchAll()
         // FIX 6: `tasks` just changed (possibly, if `refreshFromStore` picked up an out-of-band
         // mutation — see this method's own doc comment above) — keep the mirror in step. Cheap/
         // safe even when nothing actually changed: `reconcile(tasks:)` self-guards on
         // `mirrorEnabled`/access and diffs against `eventMap`, so a no-op refresh costs one
-        // `isDesired` filter pass and nothing else.
-        syncCalendarMirror()
+        // `isDesired` filter pass and nothing else. `notifySync: false` (remote-apply path) skips
+        // re-reporting pages that just arrived from the server as a local edit.
+        syncCalendarMirror(notifySync: notifySync)
     }
 
     // MARK: - Calendar mirroring wiring (FIX 6: nothing called `CalendarSync.reconcile(tasks:)`
@@ -2429,7 +2463,7 @@ final class AppState {
     /// "keep the calendar mirror in sync" means. Safe to call often: `reconcile(tasks:)` itself
     /// never throws, and no-ops almost immediately when access isn't granted or mirroring is off
     /// (see that method's own early guards, `CalendarSync.swift`).
-    private func syncCalendarMirror() {
+    private func syncCalendarMirror(notifySync: Bool = true) {
         calendarSync.reconcile(tasks: tasks)
         // 008-sync (client-contract.md §8): the SECOND of AppState's exactly-two direct touches of
         // `SyncEngine` — signal a local write happened. Deliberately placed here, not at each of the
@@ -2439,7 +2473,7 @@ final class AppState {
         // here rather than confined to the Account & Entitlements section — see
         // `notifySyncOfLocalEdit()`'s own doc comment for why that's a deliberate, single-line
         // exception rather than an oversight.
-        notifySyncOfLocalEdit()
+        if notifySync { notifySyncOfLocalEdit() }
     }
 
     /// Settings' mirror toggle routes here (never straight to `calendarSync.setMirrorEnabled(_:)`)
@@ -2580,9 +2614,9 @@ final class AppState {
     /// `selectedEngine` from retrying Groq for the REST OF THIS RUN without waiting on a second
     /// network round trip each capture — a lapsed subscription or a spent daily quota is a
     /// transient condition, not a user preference change, so the Settings picker stays exactly as
-    /// the user left it. Never reset back to `false` within a run: the next thing that legitimately
-    /// re-arms Groq is the user relaunching (fresh `AppState`) or explicitly re-picking it in
-    /// Settings after fixing the underlying issue (resubscribing, waiting for the daily reset).
+    /// the user left it. Not reset on its own within a run: what re-arms Groq is the user
+    /// relaunching (fresh `AppState`) or explicitly re-picking it in Settings (`setSpeechEngine`
+    /// clears this) after fixing the underlying issue (resubscribing, waiting for the daily reset).
     private var groqDegradedThisSession = false
 
     /// Picks the engine for the NEXT capture based on user choice, with safe fallbacks:
@@ -2608,6 +2642,7 @@ final class AppState {
         voiceDoneConfirm = nil
         voiceDoneNoMatchTranscript = nil
         captureErrorDetail = nil
+        captureErrorIsPermission = false
         pendingServerConsent = false
         pendingCloudConsent = false
         pendingParseTranscript = nil
@@ -2626,6 +2661,7 @@ final class AppState {
             guard self.captureSession == session, self.captureState == .recording else { return }
             guard granted else {
                 self.captureErrorDetail = Self.describe(.authorizationDenied)
+                self.captureErrorIsPermission = true
                 self.captureState = .error
                 return
             }
@@ -2669,14 +2705,18 @@ final class AppState {
     private func handleCaptureError(_ error: Error) {
         if case SpeechCaptureError.onDeviceUnavailable = error {
             pendingServerConsent = true
-            captureErrorDetail = "Dictation is off, so Volar can't recognize speech on-device. Turn on Dictation (System Settings ▸ Keyboard) to keep everything private and offline — or use Apple's servers, which needs internet and sends your audio to Apple."
-            print("[Volar.Speech] onError -> onDeviceUnavailable (needs Dictation or server consent)")
+            #if os(macOS)
+            let dictationHint = "Turn on Dictation (System Settings ▸ Keyboard)"
+            #else
+            let dictationHint = "Turn on Dictation in Settings ▸ General ▸ Keyboard"
+            #endif
+            captureErrorDetail = "Dictation is off, so Volar can't recognize speech on-device. \(dictationHint) to keep everything private and offline — or use Apple's servers, which needs internet and sends your audio to Apple."
             captureState = .error
             return
         }
         let detail = (error as? SpeechCaptureError).map(Self.describe) ?? error.localizedDescription
         captureErrorDetail = detail
-        print("[Volar.Speech] onError -> \(detail)")
+        if case SpeechCaptureError.authorizationDenied = error { captureErrorIsPermission = true }
         captureState = .error
     }
 
@@ -2708,11 +2748,10 @@ final class AppState {
     /// user has already moved on from.
     private func handleCloudSpeechUnavailable(session: Int, salvageAudioURL: URL) async {
         groqDegradedThisSession = true
-        // Calm, developer-facing log line only — this product has no non-error notice channel
-        // wired up yet (`IntentParsing.lastCloudQuotaNote` is the analogous parse-side signal and
-        // is itself not consumed by any view today), so per the no-shame UI rule this prefers
-        // silence over inventing a banner.
-        print("[Volar.Speech] cloud unavailable (stale entitlement or quota) -> falling back on-device")
+        // No visible notice: this product has no non-error notice channel wired up yet
+        // (`IntentParsing.lastCloudQuotaNote` is the analogous parse-side signal and is itself not
+        // consumed by any view today), so per the no-shame UI rule this prefers silence over
+        // inventing a banner.
         _ = await Entitlements.shared.refreshStatus()
 
         guard captureSession == session, captureState == .parsing else { return }
@@ -2735,7 +2774,12 @@ final class AppState {
     /// `PopoverView`'s `.error` state).
     private static func describe(_ e: SpeechCaptureError) -> String {
         switch e {
-        case .recognizerUnavailable: return "Speech recognizer unavailable on this Mac"
+        case .recognizerUnavailable:
+            #if os(macOS)
+            return "Speech recognizer unavailable on this Mac"
+            #else
+            return "Speech recognizer unavailable on this device"
+            #endif
         case .authorizationDenied: return "Microphone or Speech permission denied"
         case .recognitionFailed(let msg): return msg
         // The onError handler above sets a longer, actionable message for this case directly;
@@ -3019,6 +3063,7 @@ final class AppState {
         let isSimpleCase = drafts.count == 1
             && (drafts.first?.duplicateCandidates.isEmpty ?? false)
             && (drafts.first?.task.conditions.isEmpty ?? false)
+            && drafts.first?.task.followUpReview != true
         guard isSimpleCase else {
             // Populate `confirmDrafts` and flip `captureState` to `.parsed` — EXACTLY what
             // `runParse` does on a successful voice parse. `VolarApp.swift`'s existing
@@ -3122,10 +3167,15 @@ final class AppState {
 
     /// User consented to Apple server recognition. Persist it and immediately retry capture.
     func useServerRecognition() {
-        allowServerRecognition = true
-        UserDefaults.standard.set(true, forKey: Self.allowServerRecognitionKey)
+        setAllowServerRecognition(true)
         pendingServerConsent = false
         startCapture()
+    }
+
+    /// Settings toggle: persists the server-recognition consent only (no capture is started).
+    func setAllowServerRecognition(_ on: Bool) {
+        allowServerRecognition = on
+        UserDefaults.standard.set(on, forKey: Self.allowServerRecognitionKey)
     }
 
     /// Change the speech-recognition language (Settings ▸ Language). Persists and applies live to
@@ -3144,33 +3194,21 @@ final class AppState {
     func setSpeechEngine(_ choice: SpeechEngineChoice) {
         speechEngineChoice = choice
         UserDefaults.standard.set(choice.rawValue, forKey: Self.speechEngineKey)
+        if choice == .groq { groqDegradedThisSession = false }
         if choice == .whisperKit, WhisperKitEngine.isSupported {
             _Concurrency.Task { await whisper.prepare() }
         }
     }
 
     /// Local↔cloud parsing switch surfaced in Settings. Reads the SAME `cloudParseConsent` the
-    /// router's Cloud tier is already gated on (`DefaultCloudParseGate`), so this is purely a
-    /// friendlier presentation of that one bit — no second source of truth.
+    /// router's Cloud tier is gated on (`DefaultCloudParseGate`), so this is purely a friendlier
+    /// presentation of that one bit — no second source of truth.
     ///
-    /// Cloud-first default (same product decision as `speechEngineChoice`'s `init` fallback
-    /// above): `cloudParseConsent == nil` — NEVER asked, e.g. an install that predates the
-    /// onboarding cloud-consent step, or a corrupted/cleared default — now reads as `.cloud`
-    /// instead of `.onDevice`. An EXPLICIT decision is untouched either way: `false` (the user
-    /// affirmatively declined, either via the voice-capture consent popover's "no" or by picking
-    /// on-device in Settings) still reads `.onDevice`; `true` still reads `.cloud`. So this is a
-    /// three-way match, not a `== true` binary check — flip only the `nil` case.
-    ///
-    /// IMPORTANT — this is a DISPLAY default only, not a consent bypass: `parseEnginePreference`
-    /// is read by `SettingsView`'s picker, never by the actual gate. The real gate a `nil` value
-    /// still trips is `proceedToCapture`'s `guard cloudParseConsent != nil` (below) — an
-    /// un-consented user still sees the one-time cloud-parse consent prompt before the FIRST
-    /// parse, and `DefaultCloudParseGate.isOptedIn()` (bottom of file) still reads the literal
-    /// persisted `UserDefaults` bool, which defaults `false` for an unset key regardless of what
-    /// this computed property displays. So a user who has never actually answered the consent
-    /// question sees "Cloud" pre-highlighted here (matching the new onboarding default) but Cloud
-    /// is still never ATTEMPTED until they explicitly consent somewhere (onboarding's new step,
-    /// the in-flow popover, or this same Settings picker) — no opt-in principle is bypassed.
+    /// Cloud-first default (anh Khôi chốt 2026-09-06): `cloudParseConsent == nil` — never asked —
+    /// means cloud, in BOTH this display and the real gate (`DefaultCloudParseGate.isOptedIn()`
+    /// treats an unset key as `true`, and `proceedToCapture` no longer pauses to ask). Only an
+    /// explicit `false` (Settings ▸ parse engine, or the onboarding toggle switched off) reads
+    /// `.onDevice` and keeps text on the device.
     var parseEnginePreference: ParseEnginePreference {
         cloudParseConsent == false ? .onDevice : .cloud
     }
@@ -4789,9 +4827,16 @@ final class AppState {
             // not happen" backstop. Either way, a throw here surfaces through the shared `catch`
             // below rather than being silently dropped — a task that's already committed by the time
             // this throws stays committed either way (this loop runs strictly after the `addBatch`/
-            // merge/update steps above), just without the one edge that failed.
-            for attachment in attachments {
-                try store.addCondition(attachment.condition, to: attachment.ownID)
+            // merge/update steps above), just without the one edge that failed. Because the tasks
+            // ARE committed, a failing edge must NOT abort the save tail (that left `confirmDrafts`
+            // intact and made a retry duplicate every task): it is caught here, recorded in
+            // `captureErrorDetail`, and the normal tail below still runs.
+            do {
+                for attachment in attachments {
+                    try store.addCondition(attachment.condition, to: attachment.ownID)
+                }
+            } catch {
+                captureErrorDetail = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
             // Phase-2 refresh-from-store convention (auto-advance + menu bar stay correct).
             tasks = store.fetchAll()
@@ -4811,13 +4856,8 @@ final class AppState {
             // that did save — the user only re-confirms what's genuinely still outstanding.
             // Merges/task_refs_v1 update-field-writes/intra-batch conditions never ran (they're only
             // reached after the `do` block's `addBatch` chunk loop finishes without throwing), so
-            // there is nothing further to unwind here. If instead the `attachments` loop itself is
-            // what throws (reachable now that it also carries task_refs_v1's `refConditions`/
-            // `addConditions` edges — see that loop's own comment), everything ABOVE it in the `do`
-            // block — new tasks, merges, AND update-field writes — has already committed and stays
-            // committed; only the one failing edge (and any after it in `attachments`) is lost, same
-            // "partial success on this one edge, not a full rollback" behavior this catch already
-            // documented for merges before task_refs_v1 added a second source of a throwing edge.
+            // there is nothing further to unwind here. (The `attachments` loop has its own inner
+            // catch above and never reaches this one.)
             tasks = store.fetchAll()
             notifyEligibilityAndScheduleResurface(before: before, now: now)
             scheduleRemindersForSavedItems(itemsToSave.map(\.id))
@@ -5248,7 +5288,7 @@ final class AppState {
         let remaining = openTasks.count
         focusIndex = remaining > 0 ? max(0, min(focusIndex, remaining - 1)) : 0
         if remaining == 0 {
-            focusActive = false
+            endFocus()
         }
         if voiceFeedback {
             voice.speak(remaining > 0 ? "Done. \(remaining) left today." : "Done. All clear.")
@@ -5343,6 +5383,8 @@ final class AppState {
     private func maybeOfferBreakdown(taskID: UUID, newCount: Int) {
         guard newCount >= Self.switchBreakdownThreshold, !switchBreakdownOffered.contains(taskID) else { return }
         switchBreakdownOffered.insert(taskID)
+        let liveIDs = Set(tasks.map(\.id))
+        switchBreakdownOffered = switchBreakdownOffered.filter { liveIDs.contains($0) }
         UserDefaults.standard.set(switchBreakdownOffered.map(\.uuidString), forKey: Self.switchBreakdownOfferedKey)
         switchBreakdownSuggestion = tasks.first { $0.id == taskID }
     }
@@ -5536,6 +5578,7 @@ final class AppState {
     func setResumeNote(_ id: UUID, _ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let value: String? = trimmed.isEmpty ? nil : trimmed
+        guard tasks.first(where: { $0.id == id })?.resumeNote != value else { return }
         guard let store else {
             if let index = tasks.firstIndex(where: { $0.id == id }) {
                 tasks[index].resumeNote = value
@@ -5640,8 +5683,8 @@ final class AppState {
 
     /// Sets (or clears) the custom background image and persists its path. Picking an image
     /// implicitly switches `ambient` to `.custom`, mirroring the prototype's behavior of
-    /// previewing whatever image you just chose. Not sandboxed today, so a plain file path is
-    /// fine; if sandboxing is ever enabled, this needs a security-scoped bookmark instead.
+    /// previewing whatever image you just chose. The app IS sandboxed: the path stored here is only
+    /// for display; the persistent access grant lives in `SecureImageBookmark`.
     func setCustomImage(_ url: URL?) {
         customImageURL = url
         if let url {
@@ -5761,7 +5804,7 @@ final class AppState {
     ///
     /// This method still adds two safeguards on top of `router.breakdown`:
     ///   1. A pre-flight check of the same two cloud preconditions the rest of the app already
-    ///      surfaces (`cloudParseConsent == true` — the opt-in flag both the onboarding consent
+    ///      surfaces (`cloudParseConsent != false` — unset counts as on, the flag both the onboarding consent
     ///      toggle and the Settings parse-engine picker write — AND `ConfigParseCredentialProvider
     ///      .isConfigured`, i.e. signed in; mirrors `SettingsView`'s own "Cloud parsing status"
     ///      hint). Not signed in, or never opted in, -> `.unavailable` WITHOUT ever calling the
@@ -5781,7 +5824,7 @@ final class AppState {
         let session = breakdownSession
         breakdownFetchState = .loading
 
-        guard cloudParseConsent == true, ConfigParseCredentialProvider.isConfigured else {
+        guard cloudParseConsent != false, ConfigParseCredentialProvider.isConfigured else {
             breakdownFetchState = .unavailable
             return
         }
@@ -5879,7 +5922,7 @@ final class AppState {
     }
 
     /// Menu-bar "Preview reminder": surfaces the in-app notification banner for the current
-    /// `activeTask` (falling back to the artboard's sample copy when nothing is active).
+    /// `activeTask` (a neutral "nothing up next" banner when nothing is active).
     func showReminderPreview() {
         if let t = activeTask {
             reminderBanner = ReminderBanner(
@@ -5888,8 +5931,8 @@ final class AppState {
             )
         } else {
             reminderBanner = ReminderBanner(
-                title: "Customer call — Acme onboarding",
-                timing: "In 15 minutes · 2:00 PM"
+                title: "No task is up next",
+                timing: "Nothing coming up"
             )
         }
     }
@@ -5904,6 +5947,9 @@ final class AppState {
     /// below — mirrors `captureSession`'s pattern: every mutation recomputes the next resurface
     /// date, so a still-pending sleep from an earlier (now-superseded) computation must not fire.
     private var resurfaceSession = 0
+    /// The currently sleeping local wake; cancelled whenever a newer one supersedes it so sleeping
+    /// Tasks never pile up (one per mutation otherwise).
+    private var resurfaceTask: _Concurrency.Task<Void, Never>?
 
     /// Shared tail for every real task mutation (T031): diffs eligibility across the snapshot
     /// just before/after the mutation and notifies the scheduler once per newly-unblocked task
@@ -5943,6 +5989,8 @@ final class AppState {
     private func scheduleNextResurface(from snapshot: [VolarCore.Task], now: Date) {
         resurfaceSession += 1
         let session = resurfaceSession
+        resurfaceTask?.cancel()
+        resurfaceTask = nil
         // FIX 2: `VolarCore.nextResurfaceDate` returns only the SINGLE earliest `.afterDate`
         // across the whole snapshot, so registering just that one task with the durable scheduler
         // left every OTHER task's `.afterDate` completely unregistered. There's no safety net for
@@ -5973,9 +6021,9 @@ final class AppState {
         // 1e9)` can never come close to overflowing. The durable scheduler above already has the
         // real, un-clamped date — this only bounds the optional live-refresh nicety.
         let delaySeconds = min(max(date.timeIntervalSince(now), 0), 60 * 60 * 24 * 365 * 5)
-        _Concurrency.Task { @MainActor [weak self] in
+        resurfaceTask = _Concurrency.Task { @MainActor [weak self] in
             try? await _Concurrency.Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
-            guard let self, self.resurfaceSession == session else { return }
+            guard !_Concurrency.Task.isCancelled, let self, self.resurfaceSession == session else { return }
             if let store = self.store {
                 self.tasks = store.fetchAll()
             } else {
@@ -6116,6 +6164,8 @@ final class AppState {
     }
 
     private func persistTriageKeptAt() {
+        let liveIDs = Set(tasks.map(\.id))
+        triageKeptAt = triageKeptAt.filter { liveIDs.contains($0.key) }
         let raw = Dictionary(uniqueKeysWithValues: triageKeptAt.map { ($0.key.uuidString, $0.value.timeIntervalSince1970) })
         UserDefaults.standard.set(raw, forKey: Self.triageKeptAtKey)
     }
@@ -6273,7 +6323,7 @@ final class AppState {
             let ids = (note.userInfo?["taskIds"] as? [UUID]) ?? []
             _Concurrency.Task { @MainActor in
                 guard let self else { return }
-                self.refreshFromStore()
+                self.refreshFromStore(notifySync: false)
                 for id in ids {
                     if let t = self.tasks.first(where: { $0.id == id }), t.status != .done, t.status != .archived {
                         self.scheduler?.scheduleReminders(taskId: id)
@@ -6423,8 +6473,8 @@ final class AppState {
 /// constructed as a default parameter expression in `AppState.init` before `self` exists.
 ///
 /// `isOptedIn()` reads the exact key `AppState.resolveCloudConsent(allow:)` writes
-/// (`AppState.cloudParseConsentKey`, `fileprivate` to this file) — `false` (never opted in, or
-/// declined) is the safe default for an unset key, matching "decline ⇒ never cloud."
+/// (`AppState.cloudParseConsentKey`, `fileprivate` to this file) — an unset key means "yes"
+/// (cloud-first default, 2026-09-06); only an explicit `false` ("decline ⇒ never cloud") blocks.
 ///
 /// `isOnline()` is a best-effort `NWPathMonitor` snapshot. The protocol's own doc comment
 /// sanctions "`true` when unknown/unable to determine" as a valid answer (it's "purely an

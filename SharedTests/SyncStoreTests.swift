@@ -49,7 +49,7 @@ final class SyncStoreTests: XCTestCase {
 
         let firstPending = try XCTUnwrap(store.pendingForSync(limit: 100).first { $0.item.id == item.id })
         // Simulate a successful push+confirm round trip so the row starts clean.
-        store.markSynced([item.id: firstPending.updatedAt])
+        store.markSynced([item.id: (sent: firstPending.updatedAt, confirmed: firstPending.updatedAt)])
         XCTAssertTrue(store.pendingForSync(limit: 100).isEmpty, "row confirmed synced must not still be pending")
 
         var edited = item
@@ -67,7 +67,7 @@ final class SyncStoreTests: XCTestCase {
         store.add(item)
 
         let firstPending = try XCTUnwrap(store.pendingForSync(limit: 100).first { $0.item.id == item.id })
-        store.markSynced([item.id: firstPending.updatedAt])
+        store.markSynced([item.id: (sent: firstPending.updatedAt, confirmed: firstPending.updatedAt)])
         XCTAssertTrue(store.pendingForSync(limit: 100).isEmpty)
 
         store.toggle(item.id)
@@ -318,7 +318,17 @@ final class SyncStoreTests: XCTestCase {
         store.add(TaskItem(id: id, title: "ms", priority: .medium, when: .now))
         let pending = try XCTUnwrap(store.pendingForSync(limit: 10).first { $0.item.id == id })
         XCTAssertEqual(pending.updatedAt.timeIntervalSince1970 * 1000, (pending.updatedAt.timeIntervalSince1970 * 1000).rounded(.down), accuracy: 0.0001, "stamps are ms-truncated")
-        store.markSynced([id: pending.updatedAt.addingTimeInterval(-0.0005)])
+        store.markSynced([id: (sent: pending.updatedAt, confirmed: pending.updatedAt.addingTimeInterval(-0.0005))])
+        XCTAssertNil(store.pendingForSync(limit: 10).first { $0.item.id == id })
+    }
+
+    /// Server clamped a far-future stamp: the row adopts the clamped `updatedAt` and stops being pending.
+    func testMarkSyncedAdoptsClampedStamp() throws {
+        let store = try makeStore()
+        let id = UUID()
+        store.add(TaskItem(id: id, title: "clamp", priority: .medium, when: .now))
+        let pending = try XCTUnwrap(store.pendingForSync(limit: 10).first { $0.item.id == id })
+        store.markSynced([id: (sent: pending.updatedAt, confirmed: pending.updatedAt.addingTimeInterval(-3600))])
         XCTAssertNil(store.pendingForSync(limit: 10).first { $0.item.id == id })
     }
 }

@@ -38,6 +38,7 @@ struct FocusIOSView: View {
             Text(clock)
                 .font(IOSFont.mono(72, .medium))
                 .monospacedDigit()
+                .minimumScaleFactor(0.5).lineLimit(1)
                 .foregroundStyle(appState.focusPaused ? IOSPalette.fg3 : IOSPalette.fg)
                 .padding(.top, 24)
 

@@ -127,9 +127,11 @@ protocol SyncTaskStoring: AnyObject {
     /// Every row with `isPendingSync == true`, oldest `updatedAt` first, capped at `limit`.
     /// INCLUDES tombstones (`deletedAt != nil`) — a delete is just another pending edit.
     func pendingForSync(limit: Int) -> [PendingTask]
-    /// Marks rows as confirmed by the server: sets `syncedAt = confirmedUpdatedAt` for each id.
-    /// A row edited again in the meantime stays pending because its `updatedAt` moved past this.
-    func markSynced(_ confirmations: [UUID: Date])
+    /// Marks rows as confirmed by the server: sets `syncedAt` to the confirmed `updatedAt` for each id.
+    /// `sent` is the `updatedAt` the push carried; when the server clamped it (`confirmed < sent`) and the
+    /// row is unchanged since, the row adopts `confirmed` so it stops looking pending. A row edited again
+    /// in the meantime (`updatedAt != sent`) stays pending.
+    func markSynced(_ confirmations: [UUID: (sent: Date, confirmed: Date)])
     /// Applies a batch of remote rows under LWW. MUST NOT re-stamp `updatedAt` (see §4).
     /// Returns the ids it actually wrote (for logging/tests); rows that lost LWW are skipped.
     /// THROWS if the write to disk failed — the caller MUST NOT advance the cursor in that case
@@ -170,8 +172,9 @@ struct RemoteReward: Sendable {
 protocol SyncRewardStoring: AnyObject {
     /// Rows with `isPendingSync == true`, oldest `updatedAt` first, capped at `limit`. Includes tombstones.
     func pendingRewardsForSync(limit: Int) -> [PendingReward]
-    /// Sets `syncedAt = confirmed updatedAt` per id; a row edited meanwhile stays pending.
-    func markRewardsSynced(_ confirmations: [UUID: Date])
+    /// Same semantics as `SyncTaskStoring.markSynced`: adopts a clamped `confirmed` stamp when the row is
+    /// unchanged since `sent`; a row edited meanwhile stays pending.
+    func markRewardsSynced(_ confirmations: [UUID: (sent: Date, confirmed: Date)])
     /// LWW via `SyncMerge.decide`, without stamping `updatedAt`. THROWS on a failed disk write; the
     /// caller must not advance the cursor then (client-contract §4b). Returns ids actually written.
     @discardableResult func applyRemoteRewards(_ remote: [RemoteReward]) throws -> [UUID]

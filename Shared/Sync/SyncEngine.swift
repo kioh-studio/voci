@@ -243,6 +243,7 @@ final class SyncEngine {
             || reason == .manualResync {
             resetBackoff()
         }
+        if reason != .periodic && isForeground { startPolling() } // no-op when already running
         debounceTask?.cancel()
         debounceTask = Task { @MainActor [weak self] in
             do {
@@ -259,11 +260,21 @@ final class SyncEngine {
 
     private func registerLifecycleObservers() {
         #if os(macOS)
-        let activeName = NSApplication.didBecomeActiveNotification
-        // `didResignActiveNotification` (not `willResignActive`): this repo has no existing
-        // precedent for either on macOS, and the "did" pair reads as the more literal analogue of
-        // `didBecomeActive`'s own naming — both fire once the transition has actually completed.
-        let inactiveName = NSApplication.didResignActiveNotification
+        // macOS: the window losing focus is NOT "background" - a menu-bar/windowed app is used
+        // beside other apps all day, and stopping the poll loop on every focus loss would freeze
+        // sync until the user clicks back. Only system sleep/wake toggles the loop (same
+        // `NSWorkspace` center `VolarApp` already uses).
+        let center = NSWorkspace.shared.notificationCenter
+        center.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { @Sendable [weak self] _ in
+            Task { @MainActor in self?.handleForeground() }
+        }
+        center.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
+        ) { @Sendable [weak self] _ in
+            Task { @MainActor in self?.handleBackground() }
+        }
         #elseif os(iOS)
         let activeName = UIApplication.didBecomeActiveNotification
         // `didEnterBackground` (not `willResignActive`): iOS's `willResignActive` also fires for
@@ -274,11 +285,11 @@ final class SyncEngine {
         let inactiveName = UIApplication.didEnterBackgroundNotification
         #endif
 
+        #if os(iOS)
         // `@Sendable` closure + explicit `Task { @MainActor in }` hop: same pattern
-        // `AppState.swift`'s own `didBecomeActiveNotification` registration and
-        // `ReminderScheduler.swift`'s iOS foreground observer both use, for the same reason (a
-        // MainActor-inferred closure literal invoked by a system API not itself on `@MainActor`
-        // traps at runtime under Swift 6 isolation checking).
+        // `ReminderScheduler.swift`'s iOS foreground observer uses (a MainActor-inferred closure
+        // literal invoked by a system API not itself on `@MainActor` traps at runtime under Swift 6
+        // isolation checking).
         NotificationCenter.default.addObserver(
             forName: activeName, object: nil, queue: .main
         ) { @Sendable [weak self] _ in
@@ -289,6 +300,7 @@ final class SyncEngine {
         ) { @Sendable [weak self] _ in
             Task { @MainActor in self?.handleBackground() }
         }
+        #endif
     }
 
     private func handleForeground() {
@@ -484,6 +496,8 @@ final class SyncEngine {
             // to the one it already handles — no new state, no "sync error" string (contract §1
             // rule 2).
             lastFailure = failure
+            // Signed out: nothing to poll for until the user signs in again.
+            if case .signedOut = failure { stopPolling() }
             return
         case .unknown:
             // Never asked, or the ask failed. Say nothing and send nothing (contract §3.3: offline is
@@ -518,6 +532,10 @@ final class SyncEngine {
         // A blocked outcome (`.proRequired`/`.disabled`/`.signedOut`/non-offline `.server`) touches
         // neither — repolling faster wouldn't help any of those, but there's no stated rule to slow
         // down for them either, so the interval simply holds until the next real signal.
+        if case .signedOut = failureThisRound {
+            // Stop the poll loop; `handleForeground()` / any non-periodic `requestSync` re-arms it.
+            stopPolling()
+        }
         if case .offline = failureThisRound {
             backOffForOffline()
         } else if failureThisRound == nil {
@@ -609,6 +627,7 @@ final class SyncEngine {
         // LWW/`on conflict do nothing`, cost is a wasted round, not lost data).
         var appliedTaskIds: [UUID] = []
         var appliedRewardIds: [UUID] = []
+        var appliedCompletions = 0
         do {
             let remoteTasks = response.tasks.map(\.asRemoteTask)
             if !remoteTasks.isEmpty {
@@ -619,7 +638,7 @@ final class SyncEngine {
             }
             let remoteCompletions = response.completions.map(\.asRemoteCompletion)
             if !remoteCompletions.isEmpty {
-                _ = try store.applyRemoteCompletions(remoteCompletions)
+                appliedCompletions = try store.applyRemoteCompletions(remoteCompletions)
             }
             // Rewards: same do block, so a failed write skips every cursor (§4b).
             let remoteRewards = response.rewards.map(\.asRemoteReward)
@@ -648,10 +667,11 @@ final class SyncEngine {
         // Only now — rows are durably on disk — is it safe to tell the server "don't resend these".
         lastFailure = nil
 
-        // Confirm pushed tasks using the WRAPPER's echoed `updatedAt` — never the value this device
-        // sent — because the server clamps a clock-skewed timestamp (`least(updated_at, now() + 1
-        // minute)`, migration 0005) and THAT clamped value is what must be treated as this row's
-        // truth from now on (contract §4/§5). A pushed row absent from `response.tasks` lost LWW
+        // Confirm pushed tasks using the WRAPPER's echoed `updatedAt` alongside the value this device
+        // sent: the server clamps a clock-skewed timestamp (`least(updated_at, now() + 1 minute)`,
+        // migration 0005), so `markSynced` adopts the clamped value as the row's `updatedAt` when the
+        // row is unchanged since the push (contract §4/§5); otherwise the row would stay pending and be
+        // re-pushed every round. A pushed row absent from `response.tasks` lost LWW
         // (it's in `response.rejected`, and its losing payload is preserved server-side in
         // `sync_rejects`) — it simply isn't confirmed here, so it stays pending and the next round
         // retries it, converging once the newer remote version comes back down through the PULL
@@ -666,10 +686,10 @@ final class SyncEngine {
         let echoedUpdatedAtById = response.tasks.reduce(into: [UUID: Date]()) { dict, task in
             if dict[task.id] == nil { dict[task.id] = task.updatedAt }
         }
-        var confirmedTasks: [UUID: Date] = [:]
+        var confirmedTasks: [UUID: (sent: Date, confirmed: Date)] = [:]
         for pending in pendingTasks {
             guard let echoedUpdatedAt = echoedUpdatedAtById[pending.item.id] else { continue }
-            confirmedTasks[pending.item.id] = echoedUpdatedAt
+            confirmedTasks[pending.item.id] = (sent: pending.updatedAt, confirmed: echoedUpdatedAt)
         }
         if !confirmedTasks.isEmpty {
             store.markSynced(confirmedTasks)
@@ -680,9 +700,11 @@ final class SyncEngine {
             let echoedRewards = response.rewards.reduce(into: [UUID: Date]()) { dict, row in
                 if dict[row.id] == nil { dict[row.id] = row.updatedAt }
             }
-            var confirmedRewards: [UUID: Date] = [:]
+            var confirmedRewards: [UUID: (sent: Date, confirmed: Date)] = [:]
             for pending in pendingRewards {
-                if let echoed = echoedRewards[pending.item.id] { confirmedRewards[pending.item.id] = echoed }
+                if let echoed = echoedRewards[pending.item.id] {
+                    confirmedRewards[pending.item.id] = (sent: pending.updatedAt, confirmed: echoed)
+                }
             }
             if !confirmedRewards.isEmpty { rewardStore.markRewardsSynced(confirmedRewards) }
         }
@@ -729,7 +751,9 @@ final class SyncEngine {
         lastSuccessAt = now
         defaults.set(now, forKey: Self.lastSuccessAtKey)
 
-        let pulledSomething = !response.tasks.isEmpty || !response.completions.isEmpty || !response.rewards.isEmpty
+        // Count rows actually written, not rows delivered: the 2 s cursor overlap re-sends the last row
+        // every round, which would otherwise keep backoff from ever engaging.
+        let pulledSomething = !appliedTaskIds.isEmpty || appliedCompletions > 0 || !appliedRewardIds.isEmpty
         return (hasMore: response.hasMore, pulledSomething: pulledSomething)
     }
 

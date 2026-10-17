@@ -49,7 +49,11 @@ struct SyncEnableSheet: View {
             actionButtons
         }
         .padding(20)
+        #if os(macOS)
         .frame(width: 440)
+        #else
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #endif
         .background(VolarColor.bg)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .volarHairline(cornerRadius: 16)

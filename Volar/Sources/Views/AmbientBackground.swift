@@ -337,7 +337,6 @@ enum SecureImageBookmark {
             // when the app isn't actually sandboxed, or the URL wasn't panel-granted), skip
             // silently — the legacy raw-path fallback in `loadImage` still covers that case, and
             // nothing here should ever crash the Settings UI over a background-image picker.
-            print("[Volar.SecureImageBookmark] save failed: \(error)")
         }
     }
 
@@ -372,7 +371,6 @@ enum SecureImageBookmark {
                 bookmarkDataIsStale: &isStale
             )
         } catch {
-            print("[Volar.SecureImageBookmark] resolve failed: \(error)")
             return legacyRawLoad(fallbackRawURL)
         }
 

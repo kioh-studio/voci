@@ -83,10 +83,12 @@ struct FocusOverlay: View {
         .focused($isFocused)
         .onAppear { isFocused = true }
         .onKeyPress(.leftArrow) {
+            guard isFocused else { return .ignored }
             goToPrevious()
             return .handled
         }
         .onKeyPress(.rightArrow) {
+            guard isFocused else { return .ignored }
             goToNext()
             return .handled
         }

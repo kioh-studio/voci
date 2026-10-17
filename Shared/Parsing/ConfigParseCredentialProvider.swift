@@ -11,23 +11,17 @@
 // call the exact same route, just with different daily limits) — only Groq is tier-gated
 // client-side (see `GroqTranscriptionClient.swift`'s `EnvironmentGroqCredentialProvider`).
 //
-// `CloudParser.swift` is NOT in this task's owned-files list and still only knows two header
-// shapes: `.paidJWS(String)` -> `Authorization: Bearer <value>`, and `.freeDeviceToken(String)` ->
-// `X-Device-Token: <value>`. The contract's single-bearer shape IS exactly `.paidJWS`'s wire
-// behavior, so this file reuses that case purely to carry the account access token — the case
-// NAME is now a misnomer ("paidJWS" no longer implies a paid tier), but its WIRE BEHAVIOR
-// (`Authorization: Bearer <value>`) is exactly right, and renaming it would require editing a file
-// out of this task's scope. Flagged here for whoever next has authority over `CloudParser.swift`.
-//
+// `CloudParser`'s only auth shape is `.bearer(String)` -> `Authorization: Bearer <value>`.
+
 // Base URL (unchanged): the Supabase project ref (`cjaamylayaylbuuhwlnz`) is fixed and checked
 // into this file as `defaultBaseURL` — NOT a secret (every client of a Supabase project embeds its
-// project ref/URL). `volar.parseProxyBaseURL` in UserDefaults still overrides it, useful for
+// project ref/URL). `volar.parseProxyBaseURL` in UserDefaults overrides it in DEBUG builds only, useful for
 // pointing at a local `supabase functions serve` during development.
 import Foundation
 
 struct ConfigParseCredentialProvider: ParseCredentialProvider {
     /// UserDefaults key for the Supabase parse-proxy base URL, e.g. `https://<ref>.supabase.co`.
-    /// Overrides `defaultBaseURL` below when set — mainly useful for pointing at a local
+    /// Overrides `defaultBaseURL` below when set (DEBUG builds only) — for pointing at a local
     /// `supabase functions serve` during development.
     static let baseURLKey = "volar.parseProxyBaseURL"
 
@@ -47,10 +41,13 @@ struct ConfigParseCredentialProvider: ParseCredentialProvider {
     }
 
     func baseURL() async throws -> URL {
+        #if DEBUG
+        // Debug-only: a release build must never let a UserDefaults value redirect the bearer token.
         if let raw = UserDefaults.standard.string(forKey: Self.baseURLKey), !raw.isEmpty,
            let url = URL(string: raw) {
             return url
         }
+        #endif
         return Self.defaultBaseURL
     }
 
@@ -63,9 +60,8 @@ struct ConfigParseCredentialProvider: ParseCredentialProvider {
     /// of a hand-typed UserDefaults token.
     func authHeader() async -> ParseAuthHeader? {
         guard let token = try? await AccountService.shared.validAccessToken() else { return nil }
-        // See file header: `.paidJWS` is reused here purely for its `Authorization: Bearer` wire
-        // behavior, NOT because this is a "paid" credential — tier is decided server-side now.
-        return .paidJWS(token)
+        // Tier is decided server-side; the client always sends the account access token.
+        return .bearer(token)
     }
 }
 

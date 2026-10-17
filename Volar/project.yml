@@ -16,7 +16,7 @@ options:
 #
 # `Automatic` lets Xcode create/renew the Apple Development + Apple Distribution certs and the
 # matching profiles itself. It needs the App ID `tech.kioh.Volar` to already carry the capabilities
-# the entitlements file asks for (Sign In with Apple, In-App Purchase) — a mismatch there surfaces
+# the entitlements file asks for (In-App Purchase) — a mismatch there surfaces
 # as a profile-creation failure naming the capability, not as a signing error.
 settings:
   base:

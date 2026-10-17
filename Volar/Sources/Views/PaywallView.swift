@@ -116,8 +116,10 @@ struct PaywallView: View {
                     .padding(6)
                     .background(VolarColor.veil(0.06))
                     .clipShape(Circle())
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Close")
         }
     }
 
@@ -364,14 +366,17 @@ struct PaywallView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(VolarColor.textSec)
             }
-            Button("Manage subscription") {
+            Button {
                 openManageSubscriptions()
+            } label: {
+                Text("Manage subscription")
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .frame(height: 34)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .font(.system(size: 12.5, weight: .medium))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 16)
-            .frame(height: 34)
             .background(accentColors.solid)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }

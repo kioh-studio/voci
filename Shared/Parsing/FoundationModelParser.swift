@@ -25,14 +25,14 @@ import FoundationModels
 final class FoundationModelParser: IntentParser {
     private init() {}
 
-    /// `#available(macOS 26, *)` + Apple-Silicon + on-device-model-availability probe, ALL THREE
+    /// `#available(macOS 26, iOS 26, *)` + Apple-Silicon + on-device-model-availability probe, ALL THREE
     /// required. Returns `nil` (never constructs) unless every check passes — `IntentRouter`
     /// selects FM purely by non-nil here, never by re-checking `#available` itself. Never crashes
     /// on macOS 14/15: the `#available` guard short-circuits before any FoundationModels symbol
     /// is touched, and `#if canImport(FoundationModels)` guards compilation itself in case the
     /// building SDK doesn't even have the framework.
     static func makeIfAvailable() -> FoundationModelParser? {
-        guard #available(macOS 26, *) else { return nil }
+        guard #available(macOS 26, iOS 26, *) else { return nil }
         guard isAppleSilicon() else { return nil }
         guard probeModelAvailability() else { return nil }
         return FoundationModelParser()
@@ -52,7 +52,7 @@ final class FoundationModelParser: IntentParser {
 
     private static func probeModelAvailability() -> Bool {
         #if canImport(FoundationModels)
-        if #available(macOS 26, *) {
+        if #available(macOS 26, iOS 26, *) {
             // UNVERIFIED: FoundationModels API — confirm `SystemLanguageModel.default.availability`
             // exists with this exact spelling/shape on macOS 26 SDK. Expected surface: an enum
             // with `.available` and `.unavailable(reason:)` cases (device not eligible, Apple
@@ -76,7 +76,7 @@ final class FoundationModelParser: IntentParser {
 
     func parse(_ transcript: String, now: Date, openTaskTitles: [String]) async -> [ParsedTask] {
         #if canImport(FoundationModels)
-        guard #available(macOS 26, *) else { return [] }
+        guard #available(macOS 26, iOS 26, *) else { return [] }
         do {
             let generated = try await Self.runParseSession(transcript: transcript, now: now, openTaskTitles: openTaskTitles)
             let raws = generated.tasks.prefix(IntentRouter.maxTaskCap).map(Self.toRaw)
@@ -97,7 +97,7 @@ final class FoundationModelParser: IntentParser {
 
     func breakdown(title: String, notes: String?) async -> [String] {
         #if canImport(FoundationModels)
-        guard #available(macOS 26, *) else { return [] }
+        guard #available(macOS 26, iOS 26, *) else { return [] }
         do {
             let generated = try await Self.runBreakdownSession(title: title, notes: notes)
             let steps = generated.steps
@@ -127,7 +127,7 @@ final class FoundationModelParser: IntentParser {
         existingSubtasks: [TaskContextSubtask]?
     ) async -> [String] {
         #if canImport(FoundationModels)
-        guard #available(macOS 26, *) else { return [] }
+        guard #available(macOS 26, iOS 26, *) else { return [] }
         do {
             let generated = try await Self.runBreakdownSession(
                 title: title, notes: notes, sourceTranscript: sourceTranscript,
@@ -149,7 +149,7 @@ final class FoundationModelParser: IntentParser {
 // MARK: - @Generable guided-generation schema + session plumbing
 
 #if canImport(FoundationModels)
-@available(macOS 26, *)
+@available(macOS 26, iOS 26, *)
 extension FoundationModelParser {
     /// System instructions steering the model toward the same shape/semantics the Cloud proxy's
     /// prompt enforces server-side (`supabase/functions/_shared/gemini.ts` `SYSTEM_PREAMBLE`) —
@@ -160,9 +160,9 @@ extension FoundationModelParser {
     /// necessarily so: this tier's `@Generable` schema carries at most ONE condition per task
     /// (`conditionKind`/`conditionReferenceTitle`, see `GeneratedParsedTask`'s SCOPE NOTE), which
     /// is enough for the ordinary "task B waits on task A" case but cannot express a task waiting
-    /// on two things. MUST be kept in sync with the cloud rule: this tier runs FIRST whenever it's
-    /// available (macOS 26 + Apple Silicon + Apple Intelligence on), so a rule that lives only in
-    /// `gemini.ts` never runs at all on a machine where FM is available.
+    /// on two things. MUST be kept in sync with the cloud rule: this tier is the offline/quota
+    /// fallback and must still carry the same rule, or it silently vanishes whenever the
+    /// cloud tier is unavailable.
     private static let systemInstructions = """
         Extract 1 to 10 short, actionable tasks from a spoken utterance (Vietnamese, English, or \
         mixed). One utterance often holds MORE THAN ONE task: split it into one task per action \
@@ -181,9 +181,9 @@ extension FoundationModelParser {
         invent facts not stated or clearly implied. Report your own confidence (0 to 1) for \
         every field you fill in; omit fields you're not reasonably confident about rather than \
         guessing. Never exceed 10 tasks. CUE (006-cues-and-waiting, anh Khôi/Opus 2026-08-08, \
-        mirrors the cloud tier's identical rule -- this tier runs FIRST on a machine where it's \
-        available, so this rule must live here too, not only in the cloud prompt, per the \
-        2026-08-02 lesson that a rule living only server-side never runs on such a machine): when \
+        mirrors the cloud tier's identical rule -- this tier is the offline/quota fallback and \
+        must still carry the same rule, per the 2026-08-02 lesson that a rule living only \
+        server-side vanishes whenever the cloud is unavailable): when \
         the utterance anchors a task to something that already happens in the user's own day \
         rather than a clock time -- waking up, arriving somewhere, finishing a meal, a habit they \
         already have -- report it as a cue: cueVerbatim is the user's own anchoring clause, \
@@ -412,14 +412,14 @@ extension FoundationModelParser {
 /// richer shape, and the shared validator (`ParsedTaskValidation`) treats a missing field as "just
 /// omit it," never a crash. Tracked as a possible follow-up (see final report) to bring the FM
 /// schema to full parity once the real macro's limits are known.
-@available(macOS 26, *)
+@available(macOS 26, iOS 26, *)
 @Generable
 struct GeneratedParsedTaskList {
     @Guide(description: "1 to 10 tasks extracted from the utterance. Never more than 10.")
     var tasks: [GeneratedParsedTask]
 }
 
-@available(macOS 26, *)
+@available(macOS 26, iOS 26, *)
 @Generable
 struct GeneratedParsedTask {
     @Guide(description: "Short imperative task title, in the utterance's own language.")
@@ -493,14 +493,14 @@ struct GeneratedParsedTask {
     var cueVerbatim: String?
 }
 
-@available(macOS 26, *)
+@available(macOS 26, iOS 26, *)
 @Generable
 struct GeneratedBreakdown {
     @Guide(description: "3 to 9 steps, 5 to 15 minutes each, first step trivially small.")
     var steps: [GeneratedStep]
 }
 
-@available(macOS 26, *)
+@available(macOS 26, iOS 26, *)
 @Generable
 struct GeneratedStep {
     var title: String

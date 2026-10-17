@@ -30,9 +30,10 @@
 
 	<!-- NSOpenPanel-driven file access: the custom ambient background image picker today
 	     (SettingsView.swift `chooseImage`), and the future "Connect Claude Code" ~/.claude
-	     picker (Orchestrator, later phase). Grants access only to files the user explicitly
+	     picker (Orchestrator, later phase). Read-only: Volar only reads the picked image/folder,
+	     never writes back. Grants access only to files the user explicitly
 	     picks via the panel — not arbitrary filesystem access. -->
-	<key>com.apple.security.files.user-selected.read-write</key>
+	<key>com.apple.security.files.user-selected.read-only</key>
 	<true/>
 
 	<!-- Lets security-scoped bookmarks created from those NSOpenPanel selections keep resolving

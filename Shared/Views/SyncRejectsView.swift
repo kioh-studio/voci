@@ -36,7 +36,11 @@ struct SyncRejectsView: View {
                 list
             }
         }
+        #if os(macOS)
         .frame(width: 460, height: 480)
+        #else
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #endif
         .background(VolarColor.bg)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .volarHairline(cornerRadius: 16)
@@ -214,7 +218,11 @@ private struct SyncRejectDetail: View {
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .padding(18)
+        #if os(macOS)
         .frame(width: 420, height: 420)
+        #else
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #endif
         .background(VolarColor.bg)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .volarHairline(cornerRadius: 16)

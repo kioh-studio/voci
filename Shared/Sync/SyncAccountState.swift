@@ -28,7 +28,7 @@ actor SyncAccountClient {
     /// inheriting isolation; writing `nonisolated` here removes any doubt for a reader).
     nonisolated static let shared = SyncAccountClient()
 
-    private static let baseURL = URL(string: "https://cjaamylayaylbuuhwlnz.supabase.co")!
+    private static let baseURL = ConfigParseCredentialProvider.defaultBaseURL
     private static let apiKey = "sb_publishable_WkBa-2lGcl10NBf8JrCfJA__FPNjjf0"
 
     private let session: URLSession
@@ -43,6 +43,28 @@ actor SyncAccountClient {
 
     init(session: URLSession = .shared) {
         self.session = session
+    }
+
+    /// Sign-out / account switch: forget the previous account's gate so the engine never evaluates
+    /// the next account against it.
+    func clearCache() {
+        cachedState = nil
+    }
+
+    /// `validAccessToken()` throws a raw `AccountError` when the refresh itself fails (transient
+    /// networking to GoTrue) - surface it as `.offline` like `SyncClient.exchange` does, so callers
+    /// only ever see `SyncFailure`.
+    private func accessToken() async throws -> String {
+        do {
+            guard let token = try await AccountService.shared.validAccessToken() else {
+                throw SyncFailure.signedOut
+            }
+            return token
+        } catch let failure as SyncFailure {
+            throw failure
+        } catch {
+            throw SyncMerge.classify(status: nil, message: nil, transportError: error)
+        }
     }
 
     // MARK: - volar_sync_state (client-contract.md §3.2 — NOT gated, see design.md §8.2)
@@ -115,9 +137,7 @@ actor SyncAccountClient {
         guard let url = components?.url else {
             throw SyncFailure.server(status: 0, message: "could not build sync_rejects URL")
         }
-        guard let token = try await AccountService.shared.validAccessToken() else {
-            throw SyncFailure.signedOut
-        }
+        let token = try await accessToken()
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -141,9 +161,7 @@ actor SyncAccountClient {
     /// `GroqTranscriptionClient`). Throws `SyncFailure` (never a bare `URLError`/`AccountError`) so
     /// every caller in group C's UI switches over exactly ONE error type end to end.
     private func rpc(_ name: String, body: [String: Any]) async throws -> Data {
-        guard let token = try await AccountService.shared.validAccessToken() else {
-            throw SyncFailure.signedOut
-        }
+        let token = try await accessToken()
         let url = Self.baseURL.appendingPathComponent("rest/v1/rpc/\(name)")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"

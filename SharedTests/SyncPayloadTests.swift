@@ -55,6 +55,23 @@ final class SyncPayloadTests: XCTestCase {
         XCTAssertEqual(parsed.timeIntervalSince1970, referenceInstant().timeIntervalSince1970, accuracy: 0.001)
     }
 
+    /// Postgres drops trailing zeros, so 1-2 digit fractions occur on the wire.
+    func testParsePadsShortFractions() throws {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let base = utc.date(from: DateComponents(year: 2026, month: 8, day: 9, hour: 10, minute: 0, second: 0))!.timeIntervalSince1970
+        let cases: [(String, Double)] = [
+            ("2026-08-09T10:00:00.12+00:00", 0.12),
+            ("2026-08-09T10:00:00.5+00:00", 0.5),
+            ("2026-08-09T10:00:00.120+00:00", 0.12),
+            ("2026-08-09T10:00:00+00:00", 0)
+        ]
+        for (text, fraction) in cases {
+            let parsed = try XCTUnwrap(SyncDate.parse(text), text)
+            XCTAssertEqual(parsed.timeIntervalSince1970, base + fraction, accuracy: 0.0005, text)
+        }
+    }
+
     func testParseUnparseableStringReturnsNil() {
         XCTAssertNil(SyncDate.parse("not a timestamp at all"))
         XCTAssertNil(SyncDate.parse(""))

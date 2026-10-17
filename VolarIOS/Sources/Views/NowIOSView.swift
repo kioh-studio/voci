@@ -9,7 +9,6 @@ struct NowIOSView: View {
     @Environment(RewardCenter.self) private var rewardCenter
     @Environment(OfflineCaptureCenter.self) private var offlineCapture
 
-    @State private var unlockedGrant: RewardItem?
     @State private var showSavedToast = false
     @State private var showReparse = false
 
@@ -37,11 +36,15 @@ struct NowIOSView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .iosScreenBackground()
         .toolbar(.hidden, for: .navigationBar)
-        .sheet(item: $unlockedGrant) { grant in RewardUnlockedSheet(grant: grant) }
         .sheet(isPresented: $showReparse) { ReparseReviewSheet() }
-        .onAppear(perform: checkUnlocked)
-        .onChange(of: appState.doneTasks.map(\.id)) { _, _ in checkUnlocked() }
-        .onChange(of: rewardCenter.grants) { _, _ in checkUnlocked() }
+        // Close a break whose timer ran out (the device that started it owns the write; once only,
+        // because `closedAt` is set afterwards).
+        .task {
+            while !_Concurrency.Task.isCancelled {
+                closeExpiredBreaks()
+                try? await _Concurrency.Task.sleep(for: .seconds(1))
+            }
+        }
         .task(id: offlineCapture.lastSavedOfflineAt) {
             guard let saved = offlineCapture.lastSavedOfflineAt else { return }
             let left = 4 - Date().timeIntervalSince(saved)
@@ -178,6 +181,7 @@ struct NowIOSView: View {
             Text(timerInterval: now...end, countsDown: true)
                 .font(IOSFont.mono(64, .medium))
                 .monospacedDigit()
+                .minimumScaleFactor(0.5).lineLimit(1)
                 .foregroundStyle(IOSPalette.fg)
                 .padding(.top, 10)
             ProgressView(value: min(max(now.timeIntervalSince(start), 0), total), total: total)
@@ -261,18 +265,15 @@ struct NowIOSView: View {
         }
     }
 
-    // MARK: - Reward unlocked
+    // MARK: - Expired breaks
 
-    private func checkUnlocked() {
-        guard rewardCenter.isEnabled, unlockedGrant == nil else { return }
-        let hit = rewardCenter.grants.first {
-            !rewardCenter.offeredGrantIDs.contains($0.id)
-                && rewardCenter.state(of: $0, tasks: appState.tasks) == .unlocked
+    private func closeExpiredBreaks() {
+        let now = Date()
+        let me = SyncEngine.shared.deviceId
+        for g in rewardCenter.grants {
+            guard g.closedAt == nil, g.startedDevice == me, let ends = g.breakEndsAt, ends <= now else { continue }
+            rewardCenter.endBreak(g.id, now: ends)
         }
-        guard let hit else { return }
-        // Mark offered now so a swipe-dismiss (no button) never re-presents it.
-        rewardCenter.dismissUnlocked(hit.id)
-        unlockedGrant = hit
     }
 }
 

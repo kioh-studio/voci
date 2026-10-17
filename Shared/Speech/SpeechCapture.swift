@@ -130,7 +130,6 @@ final class SpeechCapture {
 
     init(locale: Locale = Locale(identifier: "en-US")) {
         self.recognizer = Self.resolvedRecognizer(for: locale)
-        print("[Volar.Speech] recognizer == nil: \(self.recognizer == nil)")
         #if os(iOS)
         registerInterruptionObserver()
         #endif
@@ -171,7 +170,6 @@ final class SpeechCapture {
     /// (see that function's doc comment) surfaces later as `.recognizerUnavailable`.
     func setLocale(_ locale: Locale) {
         recognizer = Self.resolvedRecognizer(for: locale)
-        print("[Volar.Speech] setLocale \(locale.identifier) -> recognizer nil: \(recognizer == nil)")
     }
 
     /// Resolves a locale to a working `SFSpeechRecognizer`, with graceful fallbacks so a capture
@@ -234,7 +232,6 @@ final class SpeechCapture {
                 once.resume(status)
             }
         }
-        print("[Volar.Speech] speech auth = \(speechStatus.rawValue)")
         guard speechStatus == .authorized else { return false }
 
         // Fix (2026-07-27): was `AVAudioApplication.requestRecordPermission()` — that API is
@@ -243,7 +240,6 @@ final class SpeechCapture {
         // the real native-macOS entry point, `AVCaptureDevice.requestAccess(for:)` — no completion
         // handler, no continuation, so still no isolation-inference hazard for the mic half.
         let micGranted = await MicrophonePermission.request()
-        print("[Volar.Speech] mic granted = \(micGranted)")
         return micGranted
     }
 
@@ -268,7 +264,6 @@ final class SpeechCapture {
             onError?(SpeechCaptureError.recognizerUnavailable)
             return
         }
-        print("[Volar.Speech] recognizer.isAvailable=\(recognizer.isAvailable) supportsOnDevice=\(recognizer.supportsOnDeviceRecognition)")
 
         onPartialHandler = onPartial
 
@@ -285,36 +280,24 @@ final class SpeechCapture {
         }
         request = newRequest
 
-        #if os(iOS)
-        // R1 (plan.md §8, HIGHEST-RISK item this phase): without an active `AVAudioSession`
-        // configured for recording, the microphone on iPhone produces silence with NO error and
-        // NO crash — this is the #1 named failure mode for voice on iOS. macOS has no
-        // `AVAudioSession` at all (bare `AVAudioEngine` is sufficient there), hence the `#if`.
-        // Errors surface through the existing `onError`/`SpeechCaptureError` mechanism per this
-        // task's contract — never `try!`/`fatalError`.
+        // iOS: without an active recording AVAudioSession the mic is silent with no error.
         do {
-            let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.duckOthers, .defaultToSpeaker])
-            try audioSession.setActive(true)
+            try RecordingAudioSession.activate()
         } catch {
-            print("[Volar.Speech] AVAudioSession activation FAILED: \(error.localizedDescription)")
             request = nil
             onError?(SpeechCaptureError.recognitionFailed("Audio session setup failed: \(error.localizedDescription)"))
             return
         }
-        #endif
 
         let inputNode = audioEngine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
-        print("[Volar.Speech] input format sampleRate=\(format.sampleRate) channels=\(format.channelCount)")
 
         // With no usable input device (or the mic TCC grant not yet effective) the hardware
         // format comes back as 0 Hz / 0 channels — `installTap` then raises an ObjC exception
         // ("IsFormatSampleRateAndChannelCountValid(format)") and CoreAudio aborts the process.
         // Fail soft through `onError` instead.
         guard format.sampleRate > 0, format.channelCount > 0 else {
-            print("[Volar.Speech] aborting start: input format is 0 Hz / 0 channels (no usable audio input device)")
-            request = nil
+            teardown()
             onError?(SpeechCaptureError.recognitionFailed("No usable audio input device"))
             return
         }
@@ -333,9 +316,7 @@ final class SpeechCapture {
         do {
             try audioEngine.start()
         } catch {
-            print("[Volar.Speech] audioEngine.start FAILED: \(error.localizedDescription)")
-            inputNode.removeTap(onBus: 0)
-            request = nil
+            teardown()
             onError?(error)
             return
         }
@@ -361,8 +342,6 @@ final class SpeechCapture {
             let nsError = error as NSError?
             let errorDomain = nsError?.domain
             let errorCode = nsError?.code
-            print("[Volar.Speech] recognitionTask error: \(errorMessage ?? "nil")")
-            print("[Volar.Speech] partial/final text len=\(text?.count ?? -1) isFinal=\(isFinal)")
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 // Stale callback from a task `cancel()`/a newer `start()` already superseded —
@@ -407,17 +386,17 @@ final class SpeechCapture {
         isRunning = false
     }
 
-    /// Immediately abandons the in-flight capture: bumps `session` FIRST (so the recognitionTask
+    /// Immediately abandons the in-flight capture: bumps `session` (via `teardown()`, so the recognitionTask
     /// completion closure's session check — see above — drops any result/error already in
     /// flight, delivering neither `onFinal` nor `onError`), then runs the same teardown `stop()`
     /// and the recognizer's own completion path share.
     func cancel() {
-        session += 1
         teardown()
     }
 
     /// Internal cleanup shared by the "recognizer finished/errored on its own" and `stop()` paths.
     private func teardown() {
+        session += 1
         task?.cancel()
         task = nil
         request = nil
@@ -426,19 +405,7 @@ final class SpeechCapture {
         }
         audioEngine.inputNode.removeTap(onBus: 0)
         isRunning = false
-        #if os(iOS)
-        // Mirrors the `setActive(true)` in `start()` above — deactivate once capture is FULLY
-        // done (here, not in `stop()`, since `stop()` only ends the audio input; the recognizer
-        // may still be delivering its final result at that point — this is the shared cleanup
-        // path every exit route (`stop()`'s eventual final callback, `cancel()`, an in-flight
-        // recognizer error) already funnels through, per this task's "don't invent a new path"
-        // instruction). Best-effort: a deactivate failure isn't a capture error, just logged.
-        do {
-            try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        } catch {
-            print("[Volar.Speech] AVAudioSession deactivation failed: \(error.localizedDescription)")
-        }
-        #endif
+        RecordingAudioSession.deactivate()
     }
 }
 

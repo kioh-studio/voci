@@ -31,7 +31,7 @@ actor SyncClient {
     /// says it explicitly rather than relying on a reader to remember the distinction.
     nonisolated static let shared = SyncClient()
 
-    private static let baseURL = URL(string: "https://cjaamylayaylbuuhwlnz.supabase.co")!
+    private static let baseURL = ConfigParseCredentialProvider.defaultBaseURL
     /// Publishable key — NOT a secret (same reasoning as `AccountService.apiKey`'s doc comment:
     /// every client of a Supabase project embeds its project's public anon/publishable key).
     private static let apiKey = "sb_publishable_WkBa-2lGcl10NBf8JrCfJA__FPNjjf0"

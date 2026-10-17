@@ -127,12 +127,13 @@ extension TaskStore: SyncRewardStoring {
     }
 
     /// `save()` (not throwing) on purpose — a lost confirmation just re-pushes once.
-    func markRewardsSynced(_ confirmations: [UUID: Date]) {
+    func markRewardsSynced(_ confirmations: [UUID: (sent: Date, confirmed: Date)]) {
         guard !confirmations.isEmpty else { return }
         withoutStamping {
-            for (id, confirmedUpdatedAt) in confirmations {
+            for (id, c) in confirmations {
                 guard let model = fetchRewardModelIncludingDeleted(id) else { continue }
-                model.syncedAt = TaskStore.confirmedStamp(confirmedUpdatedAt, local: model.updatedAt)
+                if model.updatedAt == c.sent && c.confirmed < c.sent { model.updatedAt = c.confirmed }
+                model.syncedAt = TaskStore.confirmedStamp(c.confirmed, local: model.updatedAt)
             }
             save()
         }
@@ -158,6 +159,7 @@ extension TaskStore: SyncRewardStoring {
                 } else {
                     // Insert even a bare tombstone (item == nil) so a later stale pull has a row to
                     // lose against (client-contract.md §5).
+                    guard entry.item != nil || entry.deletedAt != nil else { continue }
                     let model = RewardRecord(id: entry.id, kind: entry.item?.kind ?? .catalog, createdAt: entry.updatedAt)
                     if let item = entry.item {
                         model.apply(item)

@@ -64,7 +64,7 @@ final class CalendarSync {
         var errorDescription: String? {
             switch self {
             case .noUsableSource:
-                return "No writable local calendar source is available on this Mac, so Volar can't create its \"Volar\" calendar. Volar will never write into a subscribed calendar or one it doesn't own."
+                return "No writable calendar source is available on this device, so Volar can't create its \"Volar\" calendar. Volar will never write into a subscribed calendar or one it doesn't own."
             }
         }
     }
@@ -171,11 +171,14 @@ final class CalendarSync {
         // calendar itself might land inside an account/source the user didn't intend, defeating the
         // entire point of a dedicated calendar.
         let source: EKSource?
-        if let localSource = store.sources.first(where: { $0.sourceType == .local }) {
-            source = localSource
-        } else {
-            source = store.defaultCalendarForNewEvents?.source
-        }
+        let localSource = store.sources.first(where: { $0.sourceType == .local })
+        #if os(iOS)
+        // iOS with iCloud on hides `.local` calendars from Calendar.app, so a "Volar" calendar there
+        // would be invisible: prefer the user's default calendar's source, `.local` as fallback.
+        source = store.defaultCalendarForNewEvents?.source ?? localSource
+        #else
+        source = localSource ?? store.defaultCalendarForNewEvents?.source
+        #endif
         guard let resolvedSource = source,
               resolvedSource.sourceType != .subscribed,
               resolvedSource.sourceType != .birthdays
@@ -391,11 +394,11 @@ final class CalendarSync {
 
     // MARK: - Pure helpers (factored out static so tests can exercise them without EventKit)
 
-    /// A task is mirrored iff it's still open and has something to anchor an event to. Matches
+    /// A task is mirrored iff it's still open (todo / in progress - not done, not archived) and has something to anchor an event to. Matches
     /// `ReminderRecord.derive`'s own "no deadline, nothing to schedule" stance elsewhere in this
     /// codebase.
     static func isDesired(_ task: TaskItem) -> Bool {
-        !task.done && task.deadline != nil
+        (task.status == .todo || task.status == .inProgress) && task.deadline != nil
     }
 
     /// `deadline` is the event start; `durationMinutes` (when a positive value is set) is its

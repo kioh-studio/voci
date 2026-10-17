@@ -26,7 +26,7 @@ struct PrimaryButton: View {
             .font(IOSFont.button)
             .foregroundStyle(IOSPalette.onMint)
             .frame(maxWidth: .infinity)
-            .frame(height: IOSLayout.primaryHeight)
+            .frame(minHeight: IOSLayout.primaryHeight)
             .background(IOSPalette.primaryGradient, in: RoundedRectangle(cornerRadius: IOSLayout.buttonRadius, style: .continuous))
             .contentShape(Rectangle())
         }
@@ -54,7 +54,7 @@ struct SecondaryButton: View {
             .font(IOSFont.ui(16, .medium))
             .foregroundStyle(IOSPalette.fg)
             .frame(maxWidth: .infinity)
-            .frame(height: IOSLayout.secondaryHeight)
+            .frame(minHeight: IOSLayout.secondaryHeight)
             .background(IOSPalette.surfaceHi, in: RoundedRectangle(cornerRadius: IOSLayout.buttonRadius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: IOSLayout.buttonRadius, style: .continuous).stroke(IOSPalette.borderHi, lineWidth: 1))
             .contentShape(Rectangle())

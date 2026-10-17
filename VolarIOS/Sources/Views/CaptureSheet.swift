@@ -750,12 +750,17 @@ struct CaptureSheet: View {
                     }
                 }
             } else {
-                HStack(spacing: 10) {
-                    SecondaryButton("Dismiss") {
-                        appState.cancelCapture()
+                VStack(spacing: 10) {
+                    if appState.captureErrorIsPermission {
+                        SecondaryButton("Open Settings") { appState.openDictationSettings() }
                     }
-                    PrimaryButton("Try again") {
-                        appState.startCapture()
+                    HStack(spacing: 10) {
+                        SecondaryButton("Dismiss") {
+                            appState.cancelCapture()
+                        }
+                        PrimaryButton("Try again") {
+                            appState.startCapture()
+                        }
                     }
                 }
             }

@@ -128,8 +128,10 @@ final class WhisperKitEngine: SpeechEngine {
             AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue
         ]
         do {
+            try RecordingAudioSession.activate()
             let rec = try AVAudioRecorder(url: url, settings: settings)
             guard rec.record() else {
+                RecordingAudioSession.deactivate()
                 onError?(NSError(domain: "Volar.WhisperKit", code: 0, userInfo: [NSLocalizedDescriptionKey: "Recorder failed to start"]))
                 return
             }
@@ -138,6 +140,7 @@ final class WhisperKitEngine: SpeechEngine {
             isRunning = true
             session += 1
         } catch {
+            RecordingAudioSession.deactivate()
             onError?(error)
         }
     }
@@ -147,6 +150,7 @@ final class WhisperKitEngine: SpeechEngine {
         isRunning = false
         recorder?.stop()
         recorder = nil
+        RecordingAudioSession.deactivate()
         guard let url = fileURL else { return }
         fileURL = nil
         session += 1
@@ -188,6 +192,7 @@ final class WhisperKitEngine: SpeechEngine {
         isRunning = false
         recorder?.stop()
         recorder = nil
+        RecordingAudioSession.deactivate()
         if let url = fileURL {
             fileURL = nil
             try? FileManager.default.removeItem(at: url)

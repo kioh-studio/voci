@@ -147,8 +147,8 @@ struct VolarApp: App {
                         appState.maybeShowEveningSweep()
                     }
                 }
-                // F1/F2 integration fix: the three window-independent observers that used to live
-                // here (`.volarTasksDidChange` refresh, `.onOpenURL`, and sleep/wake recovery) were
+                // F1/F2 integration fix: the window-independent observers that used to live
+                // here (`.onOpenURL` and sleep/wake recovery) were
                 // moved to `AppDelegate` below — this `Window` scene can be CLOSED by the user at
                 // any time (⌘W leaves Volar alive in the menu bar), so `.onReceive`/`.onOpenURL`
                 // attached to it were torn down along with the window and silently stopped firing.
@@ -327,6 +327,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `?.`-guarded everywhere it's used below so a hypothetical launch ordering slip degrades
     /// gracefully (no crash) rather than force-unwrapping.
     var appState: AppState?
+
+    /// Re-opens the `Window(id: "main")` scene after the user closed it with ⌘W. Set by
+    /// `MenuBarLabel` (always mounted), which owns an `openWindow` environment action.
+    var openMainWindow: (() -> Void)?
 
     /// Owns the Services-menu provider for the app's lifetime (backlog "Đường vào Volar" [I2]).
     /// Required because `NSApplication.servicesProvider` does not retain what it is handed — drop
@@ -524,7 +528,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let mainWindow = NSApp.windows.first { window in
             !(window is NSPanel) && window.canBecomeMain
         }
-        guard let mainWindow else { return }
+        guard let mainWindow else {
+            // Closed with ⌘W: the SwiftUI Window scene is gone, ask it to open again.
+            openMainWindow?()
+            return
+        }
         NSApp.activate(ignoringOtherApps: true)
         mainWindow.makeKeyAndOrderFront(nil)
     }
@@ -730,32 +738,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `VolarApp.body` — only the delivery mechanism changed (app-lifetime `NotificationCenter`
     /// observer tokens instead of a SwiftUI view's `.onReceive`), not what each handler does.
     private func registerWindowIndependentObservers() {
-        // WG-C (FR-020 gap fix): `ReminderScheduler.handleAction`'s notification "Done" action
-        // mutates `TaskStore` directly (bypassing `AppState.toggleDone` by design — FR-014/015/016
-        // forbid that path from touching the app/window), which otherwise leaves `appState.tasks`
-        // — and `MenuBarLabel.activeTask`, derived from it — stale until some unrelated mutation
-        // refreshes it. `addObserver(forName:object:queue:.main)`'s `using` block is typed
-        // `@Sendable` and is NOT inferred `@MainActor` despite this class being `@MainActor` (same
-        // gotcha as `requestAuthorization` above), even though `queue: .main` guarantees it runs on
-        // the main thread — so hop explicitly rather than touching `appState` directly in the
-        // closure body.
-        NotificationCenter.default.addObserver(
-            forName: .volarTasksDidChange, object: nil, queue: .main
-        ) { @Sendable [weak self] _ in
-            Task { @MainActor in
-                self?.appState?.refreshFromStore()
-            }
-        }
-
         // Constitution IV: sleep/wake recovery re-evaluates overdue `.scheduled` reminders and
-        // fires immediately if still due. `ReminderScheduler.init` (sibling-owned) ALSO registers
-        // its own wake observer, but on `NotificationCenter.default` — `NSWorkspace
-        // .didWakeNotification` actually posts on `NSWorkspace.shared.notificationCenter` (used
-        // here), so that internal observer may never fire (self-review "conflict", flagged in this
-        // task's final report). This is the one guaranteed-correct path; `rebuildFromStorage()` is
-        // documented idempotent, so redundancy here (vs. the sibling-owned observer, if it ever
-        // does fire) is safe. Registered once, here, for the app's lifetime — not duplicated on the
-        // `Window` scene anymore, so there's no risk of double wake-recovery scheduling.
+        // fires immediately if still due. `ReminderScheduler` registers no wake observer of its own
+        // (`NSWorkspace.didWakeNotification` posts on `NSWorkspace.shared.notificationCenter`, not
+        // `.default`), so this is the one wake path. Registered once, here, for the app's lifetime.
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { @Sendable [weak self] _ in

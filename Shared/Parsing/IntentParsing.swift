@@ -1282,7 +1282,15 @@ enum ParsedTaskValidation {
     /// `maxTaskRefs` — defense-in-depth re-check of the server's own `MAX_TASK_REFS`, same
     /// "never trust a remote response blindly" posture every other cap in this file already follows.
     static func validateTaskRefs(_ raws: [RawParsedTaskRef]) -> [ParsedTaskRef] {
-        let mapped: [ParsedTaskRef] = raws.compactMap { raw in
+        validateTaskRefsPositional(raws).compactMap { $0 }
+    }
+
+    /// Same validation as `validateTaskRefs` but keeps one slot per RAW element (nil = dropped), so a
+    /// caller can map the server's 1-based `refIndex` (which points at the raw, pre-compaction
+    /// position) onto the compacted array. Capped at `maxTaskRefs` raw slots, mirroring the server's
+    /// truncate-then-validate order.
+    private static func validateTaskRefsPositional(_ raws: [RawParsedTaskRef]) -> [ParsedTaskRef?] {
+        raws.prefix(Self.maxTaskRefs).map { raw -> ParsedTaskRef? in
             let trimmed = raw.titleQuery.value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return nil }
             return ParsedTaskRef(
@@ -1291,7 +1299,6 @@ enum ParsedTaskValidation {
                 assumeExisting: raw.assumeExisting ?? false
             )
         }
-        return Array(mapped.prefix(Self.maxTaskRefs))
     }
 
     /// Converts `RawParsedTaskUpdate` elements into validated `ParsedTaskUpdate`s.
@@ -1387,9 +1394,23 @@ enum ParsedTaskValidation {
     ) -> ParsedCapture {
         let cappedRawTasks = Array(envelope.tasks.prefix(IntentRouter.maxTaskCap))
         let tasks = Self.validateAll(cappedRawTasks, sourceTranscript: sourceTranscript, now: now)
-        let taskRefs = Self.validateTaskRefs(envelope.taskRefs ?? [])
+        // `refIndex` is 1-based into the RAW `taskRefs`; dropping an empty-title ref compacts the
+        // array, so remap each update to its compacted position (and drop updates whose ref died).
+        let positional = Self.validateTaskRefsPositional(envelope.taskRefs ?? [])
+        let taskRefs = positional.compactMap { $0 }
+        var newIndexForRawSlot: [Int: Double] = [:]
+        var next = 0
+        for (slot, ref) in positional.enumerated() where ref != nil {
+            next += 1
+            newIndexForRawSlot[slot + 1] = Double(next)
+        }
+        let remapped: [RawParsedTaskUpdate] = (envelope.updates ?? []).map { raw in
+            var copy = raw
+            copy.refIndex = raw.refIndex.flatMap { Int(exactly: $0) }.flatMap { newIndexForRawSlot[$0] }
+            return copy
+        }
         let updates = Self.validateTaskUpdates(
-            envelope.updates ?? [], refCount: taskRefs.count, taskCount: tasks.count
+            remapped, refCount: taskRefs.count, taskCount: tasks.count
         )
         return ParsedCapture(tasks: tasks, taskRefs: taskRefs, updates: updates)
     }

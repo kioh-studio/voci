@@ -60,12 +60,17 @@ final class RewardCenter {
     }
 
     func isDone(_ goal: RewardItem, tasks: [TaskItem]) -> Bool {
-        RewardRules.isGoalDone(goal, doneTaskIds: Set(tasks.filter { $0.status == .done }.map(\.id)))
+        RewardRules.isGoalDone(goal, doneTaskIds: Self.doneIds(tasks), knownTaskIds: Set(tasks.map(\.id)))
+    }
+
+    /// Done or archived counts as resolved (same as `TaskSections.isResolved`).
+    private static func doneIds(_ tasks: [TaskItem]) -> Set<UUID> {
+        Set(tasks.filter { $0.status == .done || $0.status == .archived }.map(\.id))
     }
 
     /// How many of the goal's tasks are done.
     func doneCount(of goal: RewardItem, tasks: [TaskItem]) -> Int {
-        let done = Set(tasks.filter { $0.status == .done }.map(\.id))
+        let done = Self.doneIds(tasks)
         return goal.taskIds.filter { done.contains($0) }.count
     }
 
@@ -146,13 +151,10 @@ final class RewardCenter {
                 goalIds: ids, rewardId: source.id, remindWhenOver: source.remindWhenOver
             ))
         } else {
-            // nil (or a vanished catalog id): tombstone each goal's live grant whole.
-            var doomed = Set<UUID>()
-            for id in ids { if let g = store.liveGrant(forGoal: id) { doomed.insert(g.id) } }
-            for gid in doomed {
-                cancelBreakNotification(gid)
-                store.deleteReward(gid)
-            }
+            // nil (or a vanished catalog id): only these goals lose their reward;
+            // other goals sharing the grant keep it (`detach` tombstones a grant
+            // only once it has no goals left).
+            detach(ids)
         }
         didMutate()
     }

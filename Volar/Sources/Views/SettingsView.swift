@@ -68,20 +68,7 @@ struct SettingsView: View {
     }
 
 
-    // Cosmetic-only local settings state (not part of the frozen AppState API).
-    // `defaultDuration` used to live here too — 2026-07-29: promoted to a real `AppState` setting
-    // (`appState.defaultTaskDurationMinutes`/`setDefaultTaskDurationMinutes`), see the "Default task
-    // duration" row below, so it no longer needs a local `@State` mirror.
-    @State private var hyperfocusInterrupt = 90
-    @State private var showMorningFrog = true
-    @State private var captureAppContext = true
-
-    @State private var showReminders = true
-    @State private var notifSound = true
-    @State private var focusModeAware = false
-
-    // "Launch at login" — unlike every `@State` above this line, this is NOT cosmetic/local: it
-    // mirrors the REAL `SMAppService.mainApp.status` (`LoginItem.swift`), re-read fresh in
+    // "Launch at login" — this mirrors the REAL `SMAppService.mainApp.status` (`LoginItem.swift`), re-read fresh in
     // `.onAppear` below rather than cached across app launches, since the user can flip it from
     // System Settings behind Volar's back at any time (see `LoginItem.swift`'s header comment).
     @State private var loginItemStatus: SMAppService.Status = .notFound
@@ -345,16 +332,8 @@ struct SettingsView: View {
                     ]
                 )
             }
-            SettingsRow(label: "Hyperfocus interrupt after", hint: "Volar checks in if you've been deep on one task this long.") {
-                Segmented(value: $hyperfocusInterrupt, options: [
-                    .init(id: 60, label: "60", mono: true), .init(id: 90, label: "90", mono: true), .init(id: 120, label: "120 min", mono: true),
-                ])
-            }
-            SettingsRow(label: "Show morning frog prompt", hint: "A daily question at first launch: what's the ONE task that matters most?") {
-                VolarToggle(isOn: $showMorningFrog)
-            }
             SettingsRow(label: "Guided tour", hint: "Walk through capture, the task list, and focus mode again.") {
-                Button("Show tour") {
+                settingsPillButton("Show tour") {
                     appState.replayTour()
                     // Load-bearing: Settings is a separate `Window` scene from the main window
                     // (see the `openWindow` doc comment on this view's property), and the tour
@@ -363,17 +342,6 @@ struct SettingsView: View {
                     // no-op.
                     openWindow(id: "main")
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(VolarColor.textPri)
-                .padding(.horizontal, 12)
-                .frame(height: 26)
-                .background(VolarColor.veil(0.06))
-                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                .volarHairline(cornerRadius: 5)
-            }
-            SettingsRow(label: "Capture foreground app context", hint: "Tags new tasks with the app you were in when you captured them.") {
-                VolarToggle(isOn: $captureAppContext)
             }
             calendarAccessRow
             if appState.calendarAccess.status == .granted {
@@ -520,21 +488,13 @@ struct SettingsView: View {
     private var calendarAccessControl: some View {
         switch appState.calendarAccess.status {
         case .notDetermined:
-            Button("Enable Calendar") {
+            settingsPillButton("Enable Calendar") {
                 // FIX 6: routes through `AppState.enableCalendarAccess()` (awaits the real
                 // EventKit prompt, then immediately reconciles the calendar mirror) instead of
                 // calling `calendarAccess.requestAccess()` directly, so a fresh grant here takes
                 // effect right away rather than waiting for the next task edit.
                 Task { await appState.enableCalendarAccess() }
             }
-            .buttonStyle(.plain)
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(VolarColor.textPri)
-            .padding(.horizontal, 12)
-            .frame(height: 26)
-            .background(VolarColor.veil(0.06))
-            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-            .volarHairline(cornerRadius: 5)
 
         case .granted:
             HStack(spacing: 10) {
@@ -544,17 +504,9 @@ struct SettingsView: View {
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(VolarColor.textSec)
                 }
-                Button("Refresh") {
+                settingsPillButton("Refresh") {
                     appState.calendarAccess.refreshStatus()
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(VolarColor.textPri)
-                .padding(.horizontal, 12)
-                .frame(height: 26)
-                .background(VolarColor.veil(0.06))
-                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                .volarHairline(cornerRadius: 5)
             }
 
         case .denied, .restricted:
@@ -564,17 +516,9 @@ struct SettingsView: View {
                 Text("Access is off")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(VolarColor.textSec)
-                Button("Open System Settings") {
+                settingsPillButton("Open System Settings") {
                     appState.calendarAccess.openSystemSettings()
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(VolarColor.textPri)
-                .padding(.horizontal, 12)
-                .frame(height: 26)
-                .background(VolarColor.veil(0.06))
-                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                .volarHairline(cornerRadius: 5)
             }
 
         case .unavailable:
@@ -598,29 +542,8 @@ struct SettingsView: View {
             SettingsRow(label: "Add a task by typing", hint: "Press this combo from anywhere to open a small text box — type, hit Return, done. No speaking required.") {
                 KeyRecorder(keys: ["\u{2303}", "\u{2325}", "T"])
             }
-            SettingsRow(label: "Task breakdown (long press)", hint: "Hold the same hotkey \u{2265}1.5s to have AI split the task into steps.") {
-                HStack(spacing: 8) {
-                    Text("Long-press")
-                        .font(.system(size: 11))
-                        .foregroundStyle(VolarColor.textSec)
-                    KeyBadge("\u{2303}")
-                    KeyBadge("\u{2325}")
-                    KeyBadge("M")
-                }
-                .padding(.horizontal, 10)
-                .frame(height: 28)
-                .background(volarWellFill)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .volarHairline(cornerRadius: 8)
-            }
-            SettingsRow(label: "Show Volar window", hint: "Bring the main window to the front.") {
-                KeyRecorder(keys: ["\u{2303}", "\u{2325}", "V"])
-            }
-            SettingsRow(label: "Toggle Focus Lock", hint: "Lock the current task as your only focus — Volar will gently interrupt if you drift.") {
-                KeyRecorder(keys: ["\u{2303}", "\u{2325}", "F"])
-            }
-            SettingsRow(label: "Complete current task", hint: "When Focus Lock is active, mark the current task done without opening the window.") {
-                KeyRecorder(keys: ["\u{2303}", "\u{2325}", "\u{21A9}"])
+            SettingsRow(label: "Glance (what am I doing?)", hint: "Press to peek at your current task from anywhere; press again to hide it.") {
+                KeyRecorder(keys: ["\u{2303}", "\u{2325}", "N"])
             }
         }
     }
@@ -629,17 +552,7 @@ struct SettingsView: View {
 
     private var notificationsTab: some View {
         VStack(spacing: 0) {
-            SettingsRow(label: "Show reminders", hint: "Send a macOS notification before each task.") {
-                VolarToggle(isOn: $showReminders)
-            }
-            SettingsRow(label: "Sound", hint: "Subtle chime when a task is captured.") {
-                VolarToggle(isOn: $notifSound)
-            }
-            SettingsRow(label: "Focus mode aware", hint: "Stay silent while macOS Focus is on.") {
-                VolarToggle(isOn: $focusModeAware)
-            }
-            // Phase 4 (T033): the two rows below are wired for real to `AppState` (unlike the
-            // toggles above, still cosmetic-only local `@State` — out of this task's scope).
+            // Phase 4 (T033): the rows below are wired for real to `AppState`.
             SettingsRow(
                 label: "Default reminders before deadline",
                 hint: "Applies to any task without its own custom reminder — the global default the reminder scheduler falls back to."
@@ -821,7 +734,7 @@ struct SettingsView: View {
 
     private var permissionsTab: some View {
         VStack(spacing: 0) {
-            SettingsRow(label: "Microphone", hint: "Needed while you hold the capture hotkey, so Volar can hear what you're saying.") {
+            SettingsRow(label: "Microphone", hint: "Needed while Volar is recording after you press the capture hotkey.") {
                 HStack(spacing: 10) {
                     Text(micPermissionState.text)
                         .font(.system(size: 12, weight: .medium))
@@ -981,15 +894,7 @@ struct SettingsView: View {
                             .frame(width: 44, height: 30)
                             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
-                        Button("Choose image…") { chooseImage(appState: appState) }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(VolarColor.textPri)
-                            .padding(.horizontal, 12)
-                            .frame(height: 28)
-                            .background(VolarColor.card)
-                            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                            .volarHairline(cornerRadius: 5)
+                        settingsPillButton("Choose image…") { chooseImage(appState: appState) }
 
                         if appState.customImageURL != nil {
                             Button("Remove") {
@@ -1504,6 +1409,7 @@ struct SettingsView: View {
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
             .frame(height: 36)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .background(accentColors.solid)
@@ -1712,21 +1618,14 @@ private struct CustomImageThumbnail: View {
     }
 }
 
-/// Static key-combo chip with a trailing "Change" affordance. Ported from the prototype's
-/// `KeyRecorder`. Re-binding the actual global hotkey is Phase 3 (`HotkeyManager`).
+/// Static key-combo chip. Ported from the prototype's `KeyRecorder`; the hotkeys are fixed
+/// (`HotkeyManager`), so there is no "Change" affordance.
 private struct KeyRecorder: View {
     let keys: [String]
-
-    @Environment(AppState.self) private var appState
-    private var accentColors: Accent { appState.accent.accent }
 
     var body: some View {
         HStack(spacing: 6) {
             ForEach(keys, id: \.self) { KeyBadge($0) }
-            Text("Change")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(accentColors.solid)
-                .padding(.leading, 4)
         }
         .padding(.horizontal, 10)
         .frame(height: 28)

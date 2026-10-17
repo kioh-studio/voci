@@ -115,7 +115,8 @@ final class HotkeyManager {
     /// only — "there is no hold-to-type" per the task brief; ⌃⌥T's key-up is delivered by the same
     /// shared handler but intentionally ignored, see `handle(hotKeyID:isKeyDown:)` below).
     /// `onKeyDown`/`onKeyUp` remain ⌃⌥M-only, same as before Carbon. Safe to call again without a
-    /// prior `stop()` — any existing registration is torn down first.
+    /// prior `stop()` — any existing registration is torn down first. Glance handlers (set via
+    /// `setGlanceHandlers` or the parameters here) are kept across `stop()`/`start()`.
     func start(
         appState: AppState,
         onKeyDown: (() -> Void)? = nil,
@@ -127,8 +128,9 @@ final class HotkeyManager {
         self.appState = appState
         self.onKeyDown = onKeyDown
         self.onKeyUp = onKeyUp
-        self.onGlanceDown = onGlanceDown
-        self.onGlanceUp = onGlanceUp
+        // Glance handlers are attached once (setGlanceHandlers) and survive repeated start() calls.
+        if let onGlanceDown { self.onGlanceDown = onGlanceDown }
+        if let onGlanceUp { self.onGlanceUp = onGlanceUp }
 
         let selfPointer = Unmanaged.passRetained(self).toOpaque()
         retainedSelfPointer = selfPointer
@@ -243,7 +245,7 @@ final class HotkeyManager {
     }
 
     /// Unregisters BOTH hotkeys, removes the event handler, and releases the retained `self`
-    /// pointer handed to Carbon — clears all in-progress hold state. Idempotent: safe to call when
+    /// pointer handed to Carbon — clears all in-progress hold state (Glance handlers are kept). Idempotent: safe to call when
     /// nothing (or only one of the two hotkeys) is registered.
     func stop() {
         if let hotKeyRefCapture {
@@ -271,8 +273,6 @@ final class HotkeyManager {
         isGlanceDown = false
         onKeyDown = nil
         onKeyUp = nil
-        onGlanceDown = nil
-        onGlanceUp = nil
         appState = nil
     }
 

@@ -12,6 +12,8 @@ struct VolarIOSApp: App {
     @State private var rewardCenter: RewardCenter
     @State private var offlineCapture: OfflineCaptureCenter
     @Environment(\.scenePhase) private var scenePhase
+    /// When the app left the foreground; the focus timer is suspended in the background.
+    @State private var backgroundedAt: Date?
 
     /// Onboarding gate: no `OnboardingIOSView` yet, so the flag is flipped true on first launch.
     @AppStorage("hasOnboardedV1") private var hasOnboarded = false
@@ -31,11 +33,14 @@ struct VolarIOSApp: App {
         _appState = State(initialValue: state)
         _rewardCenter = State(initialValue: rewards)
         _offlineCapture = State(initialValue: offline)
+        RootTabView.configureTabBarAppearance()
 
         // Must be registered before the app finishes launching; `App.init` runs early enough.
-        // UNVERIFIED: not run on device. The handler runs on a background queue, hence the
-        // `@MainActor` hop; the 20s sleep gives the sync round-trip time before we report done.
-        BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.refreshTaskID, using: nil) { task in
+        // UNVERIFIED: not run on device. The handler is delivered on the main queue (`using: .main`); the
+        // `@MainActor` hop is still explicit for the async body; the 20s sleep gives the sync round-trip time before we report done.
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.refreshTaskID, using: .main) { task in
+            // Re-arm first: BGAppRefresh is one-shot, so without this it only ever fires once.
+            Self.scheduleRefresh()
             // `BGTask` is not Sendable; boxing it like `ReminderScheduler` boxes completion handlers
             // keeps Swift 6 strict concurrency from rejecting the hop into the `@MainActor` Task.
             nonisolated(unsafe) let bgTask = task
@@ -78,9 +83,17 @@ struct VolarIOSApp: App {
                 .onChange(of: scenePhase) { _, newPhase in
                     switch newPhase {
                     case .active:
+                        // The 1s focus timer does not run while suspended: catch up by wall clock.
+                        if let since = backgroundedAt, appState.focusActive, !appState.focusPaused {
+                            let elapsed = Int(Date().timeIntervalSince(since))
+                            appState.focusSecondsLeft = max(0, appState.focusSecondsLeft - elapsed)
+                            if appState.focusSecondsLeft == 0 { appState.endFocus() }
+                        }
+                        backgroundedAt = nil
                         appState.refreshFromStore()
                         rewardCenter.refresh()
                     case .background:
+                        backgroundedAt = Date()
                         Self.scheduleRefresh()
                     default:
                         break

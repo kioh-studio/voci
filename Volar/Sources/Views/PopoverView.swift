@@ -436,8 +436,11 @@ struct PopoverView: View {
                 }
             }
             .frame(width: 16, height: 16)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Include task")
+        .accessibilityValue(draft.isIncluded ? "On" : "Off")
         .padding(.top, 2) // optically aligns with the title's first line, not its full 1-3 line height
     }
 
@@ -802,8 +805,11 @@ struct PopoverView: View {
                         appState.dismissCondition(at: index, forDraft: draft.id)
                     } label: {
                         VolarIcon(.x, size: 9, color: VolarColor.textMut)
+                            .padding(4)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Remove condition")
                 }
             }
         } else {
@@ -874,8 +880,11 @@ struct PopoverView: View {
                 appState.dismissCondition(at: index, forDraft: draft.id)
             } label: {
                 VolarIcon(.x, size: 9, color: VolarColor.textMut)
+                    .padding(4)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Remove condition")
         }
     }
 
@@ -1114,15 +1123,18 @@ struct PopoverView: View {
                 appState.dismissUpdateField(field, forDraft: draft.id)
             } label: {
                 VolarIcon(.x, size: 8, color: VolarColor.textMut)
+                    .padding(4)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Ignore this change")
             .padding(.top, 1)
         }
     }
 
     /// Cursor-borrowed Accept/Reject action row (design-spec.md §4.1) for one `.existing`-target
-    /// update card. "Reject ⎋" (ghost) is `AppState.dismissConfirmUpdateDraft` — the exact call
-    /// this card's old header "x" already made, just a real labeled button now. "Accept ⏎" (primary,
+    /// update card. "Reject" (ghost) is `AppState.dismissConfirmUpdateDraft` — the exact call
+    /// this card's old header "x" already made, just a real labeled button now. "Accept" (primary,
     /// `appState.accent.accent` fill — NEVER mint; the diff card is not the single NOW task) bulk-
     /// marks every still-`pending` field on this card accepted in one tap, via the SAME
     /// `AppState.acceptUpdateField` each `updateDiffField` above already calls one at a time when
@@ -1141,11 +1153,11 @@ struct PopoverView: View {
             } label: {
                 HStack(spacing: 6) {
                     Text("Reject").font(.system(size: 12, weight: .medium))
-                    Kbd("⎋")
                 }
                 .foregroundStyle(VolarColor.textPri)
                 .padding(.horizontal, 10)
                 .frame(height: 26)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .background(VolarColor.card)
@@ -1160,11 +1172,11 @@ struct PopoverView: View {
             } label: {
                 HStack(spacing: 6) {
                     Text("Accept").font(.system(size: 12, weight: .medium))
-                    Kbd("⏎")
                 }
                 .foregroundStyle(.white)
                 .padding(.horizontal, 10)
                 .frame(height: 26)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .background(appState.accent.accent.solid)
@@ -1179,7 +1191,7 @@ struct PopoverView: View {
 
     /// Loops the SAME per-field `AppState.acceptUpdateField` `updateDiffField`'s own tap-to-accept
     /// already calls, once per PRESENT field that is both uncertain and not yet accepted — the
-    /// bulk half of `updateActionRow`'s "Accept ⏎". No new `AppState` method, no save-path call.
+    /// bulk half of `updateActionRow`'s "Accept". No new `AppState` method, no save-path call.
     private func acceptAllPendingUpdateFields(_ draft: ConfirmUpdateDraft) {
         if let deadline = draft.deadline, deadline.isUncertain, !draft.accepted.contains(.deadline) {
             appState.acceptUpdateField(.deadline, forDraft: draft.id)
@@ -1289,6 +1301,7 @@ struct PopoverView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 9)
                             .frame(height: 26)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .background(VolarColor.card)
@@ -1353,6 +1366,7 @@ struct PopoverView: View {
                 .lineLimit(1)
                 .padding(.horizontal, 14)
                 .frame(height: 34)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .background(accent.solid)
@@ -1375,6 +1389,7 @@ struct PopoverView: View {
                 .foregroundStyle(VolarColor.textPri)
                 .padding(.horizontal, 14)
                 .frame(height: 34)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .background(VolarColor.card)
@@ -1420,7 +1435,7 @@ struct PopoverView: View {
 
     /// Formats a `remindPeriod` (seconds) for both `reminderLabel` above and `ReminderControl`'s
     /// own preset list — "15m"/"30m"/"1h"/"2h"/"4h"/"1 day" for this control's fixed preset set
-    /// (`ReminderControl.presets`); a non-preset value (should not occur through this UI today,
+    /// (`ReminderPolicy.repeatPresets`); a non-preset value (should not occur through this UI today,
     /// nothing else writes `remindPeriod`) still degrades gracefully to whichever unit divides it
     /// evenly, else falls back to whole minutes.
     fileprivate static func formattedReminderPeriod(_ seconds: TimeInterval) -> String {
@@ -1459,17 +1474,6 @@ struct PopoverView: View {
         abs(date.timeIntervalSinceNow) <= 120
             ? "Starts now"
             : "Starts \(date.formatted(.dateTime.hour().minute()))"
-    }
-
-    /// Mirrors `TaskItem.durationLabel`'s formatting ("45 min" / "1 hr" / "1h 30m"); duplicated
-    /// here (rather than reaching into `TaskItem`) because `ParsedTask` is a distinct, smaller
-    /// pre-save value type and this file must not modify frozen Model files.
-    fileprivate static func formattedDuration(_ minutes: Int) -> String {
-        if minutes < 60 { return "\(minutes) min" }
-        let hours = minutes / 60
-        let mins = minutes % 60
-        if mins == 0 { return hours == 1 ? "1 hr" : "\(hours) hrs" }
-        return "\(hours)h \(mins)m"
     }
 
     // MARK: - Dependency cycle (blocking)
@@ -1543,6 +1547,7 @@ struct PopoverView: View {
                     .foregroundStyle(VolarColor.textPri)
                     .padding(.horizontal, 14)
                     .frame(height: 34)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .background(VolarColor.card)
@@ -1570,6 +1575,7 @@ struct PopoverView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: 34)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .background(appState.captureState == .saving ? accent.surface : accent.solid)
@@ -1639,6 +1645,7 @@ struct PopoverView: View {
                         .foregroundStyle(VolarColor.textPri)
                         .frame(maxWidth: .infinity)
                         .frame(height: 34)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .background(VolarColor.card)
@@ -1657,6 +1664,7 @@ struct PopoverView: View {
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .frame(height: 34)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .background(accent.solid)
@@ -1686,6 +1694,7 @@ struct PopoverView: View {
                     .lineLimit(1)
                     .frame(maxWidth: .infinity)
                     .frame(height: 34)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .background(accent.solid)
@@ -1706,6 +1715,7 @@ struct PopoverView: View {
                     .lineLimit(2)
                     .frame(maxWidth: .infinity)
                     .frame(height: 34)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .background(VolarColor.card)
@@ -1734,6 +1744,7 @@ struct PopoverView: View {
                     .lineLimit(1)
                     .frame(maxWidth: .infinity)
                     .frame(height: 34)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .background(accent.solid)
@@ -1754,6 +1765,7 @@ struct PopoverView: View {
                     .lineLimit(2)
                     .frame(maxWidth: .infinity)
                     .frame(height: 34)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .background(VolarColor.card)
@@ -1835,8 +1847,11 @@ private struct Chip: View {
                 .truncationMode(.tail)
             Button(action: onDismiss) {
                 VolarIcon(.x, size: 8, color: VolarColor.textMut)
+                    .padding(4)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Remove")
         }
         .font(.system(size: 11.5, weight: .medium))
         .foregroundStyle(showsDashed ? VolarColor.textSec : (mono ? VolarColor.instrument : VolarColor.textPri))
@@ -2001,16 +2016,12 @@ private struct EstimateControl: View {
     let appState: AppState
     @State private var showingPicker = false
 
-    /// Fixed per the contract (§3) — not derived from anything, so no risk of an empty/degenerate
-    /// list; `[5, 10, 15, 30, 45, 60, 90, 120, 180, 240]` minutes.
-    private static let presets = [5, 10, 15, 30, 45, 60, 90, 120, 180, 240]
-
     var body: some View {
         Group {
             if let estimate = draft.effectiveEstimateMinutes, !draft.dismissed.contains(.estimate) {
                 // Estimate is a duration readout — mono instrument face, unchanged from before.
                 Chip(
-                    label: PopoverView.formattedDuration(estimate.value),
+                    label: TaskItem.durationLabel(minutes: estimate.value),
                     uncertain: estimate.isUncertain,
                     accepted: draft.accepted.contains(.estimate),
                     mono: true,
@@ -2034,12 +2045,12 @@ private struct EstimateControl: View {
     /// open for.
     private var estimatePopoverContent: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Self.presets, id: \.self) { minutes in
+            ForEach(TaskItem.durationPresetMinutes, id: \.self) { minutes in
                 Button {
                     appState.setDraftEstimateMinutes(minutes, forDraft: draft.id)
                     showingPicker = false
                 } label: {
-                    Text(PopoverView.formattedDuration(minutes))
+                    Text(TaskItem.durationLabel(minutes: minutes))
                         .font(.system(size: 12.5))
                         .foregroundStyle(VolarColor.textPri)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -2104,8 +2115,11 @@ private struct PriorityControl: View {
                     appState.dismissAttribute(.priority, forDraft: draft.id)
                 } label: {
                     VolarIcon(.x, size: 8, color: VolarColor.textMut)
+                        .padding(4)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Remove priority")
             }
         } else if draft.effectivePriority == nil {
             Menu {
@@ -2178,12 +2192,6 @@ private struct ReminderControl: View {
     let appState: AppState
     @State private var showingPicker = false
 
-    /// Fixed per the contract (§3): 15m / 30m / 1h / 2h / 4h / 1 day, expressed in seconds
-    /// (`ReminderPolicy.remindPeriod`'s own unit).
-    private static let presets: [TimeInterval] = [
-        15 * 60, 30 * 60, 60 * 60, 2 * 60 * 60, 4 * 60 * 60, 24 * 60 * 60,
-    ]
-
     var body: some View {
         Group {
             if let reminder = draft.effectiveReminderOverride, !draft.dismissed.contains(.reminder) {
@@ -2211,7 +2219,7 @@ private struct ReminderControl: View {
 
     private var reminderPopoverContent: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Self.presets, id: \.self) { seconds in
+            ForEach(ReminderPolicy.repeatPresets, id: \.self) { seconds in
                 Button {
                     appState.setDraftRemindPeriod(seconds, forDraft: draft.id)
                     showingPicker = false

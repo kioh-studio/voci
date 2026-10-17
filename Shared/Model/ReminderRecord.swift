@@ -186,8 +186,12 @@ extension ReminderRecord {
         let policy = reminderOverride ?? globalPolicy
 
         let fixedMarks: [Mark] = policy.offsets.map { offset in
-            Mark(
-                date: deadline.addingTimeInterval(offset),
+            // "-1d" is a calendar day (DST-safe), not a flat 86400 s.
+            let markDate = offset == -86400
+                ? (Calendar.current.date(byAdding: .day, value: -1, to: deadline) ?? deadline.addingTimeInterval(offset))
+                : deadline.addingTimeInterval(offset)
+            return Mark(
+                date: markDate,
                 offsetKind: offsetKind(for: offset),
                 isHighUrgency: offset >= 0,
                 boundaryBehavior: .drop

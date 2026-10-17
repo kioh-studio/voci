@@ -151,8 +151,7 @@ struct TodayView: View {
                 }
                 // Settings entry point from the main window: previously reachable ONLY via the
                 // menu-bar dropdown or the ⌘, shortcut (which requires the window to already be
-                // key). See `SettingsToolButton`'s own doc comment below for why this isn't just
-                // `ToolButton` with a `SettingsLink`-flavored action.
+                // key). See `SettingsToolButton`.
                 SettingsToolButton()
             }
         }
@@ -168,16 +167,6 @@ struct TodayView: View {
         }
     }
 
-    // MARK: - Detail panel
-
-    /// Task-detail inspector column (panel-refactor.md §5 item 3) — replaces the old `.sheet`
-    /// (`VolarApp.swift` used to present `TaskDetailView` modally; that `.sheet` is gone). `@ViewBuilder`
-    /// `if` (not a ternary/`opacity`) so the column is fully absent from the `HStack`'s layout when
-    /// `detailTask` is `nil`, rather than reserving 340pt of empty space — and so the
-    /// `.transition`/`.animation(VolarMotion.state, value: appState.detailTaskID)` pair on the
-    /// `HStack` above actually has an insertion/removal edge to animate.
-    ///
-    /// Fixed 340pt width, `VolarColor.surface` background, 0.5pt `VolarColor.border` hairline on the
     // MARK: - Main column
 
     private var mainColumn: some View {
@@ -848,6 +837,7 @@ struct TodayView: View {
                         pulseTick = true
                     }
                 }
+                .onDisappear { pulseTick = false }
 
             Text(appState.frogTask?.title ?? "Focus")
                 .font(.system(size: 11.5, weight: .medium))
@@ -871,6 +861,7 @@ struct TodayView: View {
             .buttonStyle(.plain)
             .background(VolarColor.veil(0.08))
             .clipShape(Circle())
+            .accessibilityLabel(appState.focusPaused ? "Resume" : "Pause")
 
             Button {
                 appState.endFocus()
@@ -882,6 +873,7 @@ struct TodayView: View {
             .buttonStyle(.plain)
             .background(VolarColor.veil(0.08))
             .clipShape(Circle())
+            .accessibilityLabel("End focus")
         }
         .font(.system(size: 11.5))
         .foregroundStyle(VolarColor.textSec)
@@ -989,21 +981,9 @@ struct TodayView: View {
     }
 }
 
-/// Gear entry point into Settings from the main window's toolbar. Visually matches
-/// `Components.swift`'s `ToolButton` (28x28 hit target, 5pt-rounded hover tint, subtle press
-/// scale) so it reads as one more tool alongside ambient/read-aloud/search/capture — but it wraps
-/// `SettingsLink` (macOS 14+, opens the app's `Settings` scene) instead of a plain `Button`, for
-/// two reasons: `SettingsLink` owns its action outright and has no `action:` closure parameter to
-/// plug into `ToolButton`, and `ToolButton`/`ToolButtonStyle` both live in `Components.swift`,
-/// which is frozen/off-limits for this task. `SettingsLink { Text(...) }` mirrors the exact usage
-/// already in `VolarApp.swift`'s `MenuBarMenuContent` per the task brief; `ToolButtonStyle`'s
-/// press-scale is small enough to re-declare locally (`SettingsToolButtonStyle` below) rather than
-/// touching that file to make it non-private.
-///
-/// UNVERIFIED: whether `SettingsLink` actually honors a custom `ButtonStyle`/hover-driven
-/// background the way a plain `Button` does isn't confirmed on this machine (no Xcode/Swift
-/// toolchain to render it) — if it silently ignores `.buttonStyle(_:)` at runtime, the gear would
-/// still open Settings correctly, just without the hover/press affordance matching its siblings.
+/// Gear menu in the main window's toolbar: ambient sound, read-aloud, and a `SettingsLink` into
+/// the app's `Settings` scene. A `Menu`, not a plain button — the first two items are actions that
+/// don't belong on the Settings screen itself.
 private struct SettingsToolButton: View {
     @Environment(AppState.self) private var appState: AppState
     @State private var isHovering = false
@@ -1039,9 +1019,7 @@ private struct SettingsToolButton: View {
     }
 }
 
-/// Press-scale dùng chung cho `SignInToolPill` (và trước đây cho `SettingsToolButton`, nay đã đổi
-/// sang `Menu` nên không cần `ButtonStyle` nữa). Bản khai lại tại chỗ của `ToolButtonStyle` trong
-/// `Components.swift` — xem chú thích ở `SettingsToolButton` cho lý do không dùng thẳng bản đó.
+/// Press-scale cho `SignInToolPill`.
 private struct SettingsToolButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label

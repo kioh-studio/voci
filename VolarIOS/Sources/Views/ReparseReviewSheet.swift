@@ -8,12 +8,14 @@ struct ReparseReviewSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var parsed: [ParsedTask]?
+    /// The AI could not be reached (route fell back to title-only): keep the capture queued.
+    @State private var unreachable = false
 
     private var current: PendingReparse? { offline.pending.first }
 
     /// Single plain task identical to what was said: nothing to improve.
     private var nothingToTidy: Bool {
-        guard let current, let parsed, parsed.count == 1, let only = parsed.first else { return false }
+        guard !unreachable, let current, let parsed, parsed.count == 1, let only = parsed.first else { return false }
         let said = current.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         return only.title == said && only.deadline == nil && only.priority == nil && only.estimateMinutes == nil
     }
@@ -47,8 +49,11 @@ struct ReparseReviewSheet: View {
         // Re-runs for the next capture when the head of `pending` changes.
         .task(id: current?.id) {
             parsed = nil
+            unreachable = false
             guard let current else { return }
-            parsed = await appState.reparse(current.transcript)
+            let result = await appState.reparse(current.transcript)
+            unreachable = appState.lastParseRoute == .titleOnly || result.isEmpty
+            parsed = result
         }
     }
 
@@ -58,7 +63,10 @@ struct ReparseReviewSheet: View {
     }
 
     @ViewBuilder private var content: some View {
-        if let parsed {
+        if unreachable {
+            Text("Couldn't reach Volar's AI - try again later.")
+                .font(IOSFont.body).foregroundStyle(IOSPalette.fg2)
+        } else if let parsed {
             if nothingToTidy {
                 Text("Nothing to tidy \u{2014} it's already a task.")
                     .font(IOSFont.body).foregroundStyle(IOSPalette.fg2)
@@ -122,7 +130,7 @@ struct ReparseReviewSheet: View {
 
     @ViewBuilder private func buttons(for current: PendingReparse) -> some View {
         VStack(spacing: 6) {
-            if parsed != nil {
+            if parsed != nil && !unreachable {
                 if nothingToTidy {
                     PrimaryButton("OK") { finish(current, apply: false) }
                 } else {
@@ -134,7 +142,10 @@ struct ReparseReviewSheet: View {
     }
 
     private func finish(_ item: PendingReparse, apply: Bool) {
-        if apply, let parsed { appState.applyReparse(taskId: item.id, parsed: parsed) }
+        if apply, let parsed {
+            // Only a successful apply consumes the capture; on failure it stays queued.
+            guard appState.applyReparse(taskId: item.id, parsed: parsed) else { return }
+        }
         offline.remove(item.id) // no-op if applyReparse already removed it
         if offline.pending.isEmpty { dismiss() } // else `.task(id:)` re-runs for the next capture
     }

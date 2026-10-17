@@ -160,6 +160,7 @@ struct OnboardingView: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 22)
                 .frame(height: 44)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .background(accentColors.solid)
@@ -216,6 +217,7 @@ struct OnboardingView: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 22)
                         .frame(height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .background(accentColors.solid)
@@ -230,6 +232,7 @@ struct OnboardingView: View {
                         .foregroundStyle(VolarColor.textSec)
                         .padding(.horizontal, 18)
                         .frame(height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .volarHairline(cornerRadius: 11)
@@ -340,6 +343,7 @@ struct OnboardingView: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 22)
                 .frame(height: 44)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .background(accentColors.solid)
@@ -411,6 +415,7 @@ struct OnboardingView: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 22)
                 .frame(height: 44)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .background(accentColors.solid)

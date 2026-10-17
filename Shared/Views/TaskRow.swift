@@ -29,22 +29,6 @@ struct TaskRow: View {
 
     private var accentColors: Accent { appState.accent.accent }
 
-    private var priorityColor: Color {
-        switch task.priority {
-        case .high: return VolarColor.high
-        case .medium: return VolarColor.med
-        case .low: return VolarColor.low
-        }
-    }
-
-    private var priorityLabel: String {
-        switch task.priority {
-        case .high: return "High"
-        case .medium: return "Medium"
-        case .low: return "Low"
-        }
-    }
-
     /// Màu hạn theo `DeadlineUrgency` (anh Khôi chốt 2026-08-20) — `nil` khi còn ≥ nửa quãng
     /// đường, khi task không có hạn, khi đã xong, hoặc khi đã quá hạn (quá hạn có luật riêng, xem
     /// `DeadlineUrgency`'s header). `Date()` đọc tại chỗ, cùng lý do `volarRankReason` trong
@@ -246,8 +230,8 @@ struct TaskRow: View {
             }
 
             HStack(spacing: 8) {
-                Circle().fill(priorityColor).frame(width: 5, height: 5)
-                Text(task.done ? "Done" : priorityLabel)
+                Circle().fill(priorityTint(task.priority)).frame(width: 5, height: 5)
+                Text(task.done ? "Done" : priorityName(task.priority))
                 if let durationLabel = task.durationLabel, !task.done {
                     Text("·").opacity(0.4)
                     Text(durationLabel)

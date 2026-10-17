@@ -6,9 +6,11 @@
 // in the prototype).
 import Foundation
 import SwiftUI
+import AppKit
 
 struct MenuBarLabel: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.openWindow) private var openWindow
 
     private var accentColors: Accent { appState.accent.accent }
 
@@ -23,6 +25,9 @@ struct MenuBarLabel: View {
             } else {
                 idleContent
             }
+        }
+        .onAppear {
+            (NSApp.delegate as? AppDelegate)?.openMainWindow = { openWindow(id: "main") }
         }
     }
 

@@ -690,6 +690,31 @@ final class CloudParserTests: XCTestCase {
         XCTAssertEqual(update.addConditions, [.taskDoneNewTask(index: 1)])
     }
 
+    /// An empty-title ref in the MIDDLE compacts `taskRefs`; `refIndex` (1-based into the raw array)
+    /// must follow its ref to the compacted position, and an update aimed at the dropped ref is dropped.
+    func testEmptyTitleTaskRefRemapsRefIndexAndDropsDeadUpdate() throws {
+        let json = """
+        {
+          "tasks": [],
+          "taskRefs": [
+            {"titleQuery": {"value": "First", "confidence": 0.9}},
+            {"titleQuery": {"value": "   ", "confidence": 0.9}},
+            {"titleQuery": {"value": "Third", "confidence": 0.9}}
+          ],
+          "updates": [
+            {"refIndex": 3, "set": {"notesAppend": {"value": "for third", "confidence": 0.9}}},
+            {"refIndex": 2, "set": {"notesAppend": {"value": "for dropped", "confidence": 0.9}}}
+          ]
+        }
+        """.data(using: .utf8)!
+        let envelope = try JSONDecoder().decode(RawParseEnvelope.self, from: json)
+        let capture = ParsedTaskValidation.validateCapture(envelope, sourceTranscript: "t")
+        XCTAssertEqual(capture.taskRefs.map(\.titleQuery), ["First", "Third"])
+        XCTAssertEqual(capture.updates.count, 1)
+        XCTAssertEqual(capture.updates.first?.refIndex, 2)
+        XCTAssertEqual(capture.updates.first?.notesAppend?.value, "for third")
+    }
+
     /// (b) A bare `[RawParsedTask]` array (today's shape, or an old/rolled-back server that never
     /// recognized `client_caps`) still decodes — as `ParsedCapture` with empty `taskRefs`/`updates`
     /// — the back-compat/rollback path `CloudParser.performParse` falls back to. Also pins the
@@ -1238,5 +1263,12 @@ final class CloudParserTests: XCTestCase {
         """.data(using: .utf8)!
         let decodedWithoutCue = try JSONDecoder().decode(ParsedTask.self, from: jsonWithoutCue)
         XCTAssertNil(decodedWithoutCue.cue, "missing cue key must decode as nil, never throw")
+    }
+
+    /// "remind me every 30 minutes" is a reminder cadence, not a duration estimate.
+    func testReminderCadenceIsNotEstimate() {
+        let parsed = HeuristicNLParser().parse("call mom remind me every 30 minutes")
+        XCTAssertNil(parsed.estimateMinutes)
+        XCTAssertEqual(parsed.reminderOverride?.value.repeatEvery, 1800)
     }
 }

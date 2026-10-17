@@ -89,7 +89,8 @@ extension AppState {
 
         // A capture already in flight (the user is mid-`⌃⌥T`, or a previous intent is still
         // parsing): refuse rather than stomp on `textCaptureInput` and lose what they typed.
-        guard textCapture != .saving else {
+        let draftInProgress = textCapture == .editing && !textCaptureInput.isEmpty
+        guard textCapture != .saving, !draftInProgress else {
             return .failed("Volar is already saving a capture. Try again in a moment.")
         }
 

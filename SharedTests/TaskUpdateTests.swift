@@ -118,4 +118,15 @@ final class TaskUpdateTests: XCTestCase {
         XCTAssertEqual(reloaded.createdAt, fixedCreatedAt)
         XCTAssertEqual(reloaded.parentId, parent.id)
     }
+
+    /// New tasks must persist `cue` (it was dropped by `insertSanitized`).
+    func testAddPersistsCue() throws {
+        let store = try makeStore()
+        let now = Date()
+        let cue = TaskCue(kind: .wake, verbatim: "when I wake up", createdAt: now, expiresAt: TaskCue.defaultExpiry(from: now))
+        var item = TaskItem(title: "Cued", priority: .medium, when: .now)
+        item.cue = cue
+        store.add(item)
+        XCTAssertEqual(store.fetchAll().first?.cue, cue)
+    }
 }

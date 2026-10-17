@@ -88,7 +88,7 @@ struct EnvironmentGroqCredentialProvider: GroqCredentialProvider {
     /// Default: Volar's Supabase edge-function proxy for Groq Speech-to-Text (holds the real Groq
     /// key server-side; see `supabase/functions/groq/index.ts`). Force-unwrap is safe: fixed,
     /// hand-verified literal, never user input.
-    static let groqProxyBaseURL = URL(string: "https://cjaamylayaylbuuhwlnz.supabase.co/functions/v1/groq")!
+    static let groqProxyBaseURL = ConfigParseCredentialProvider.defaultBaseURL.appendingPathComponent("functions/v1/groq")
 
     /// `true` iff there is a signed-in session. Reading Keychain here (rather than awaiting the
     /// network) is what lets `AppState.selectedEngine` gate Groq SYNCHRONOUSLY before a capture
@@ -108,11 +108,14 @@ struct EnvironmentGroqCredentialProvider: GroqCredentialProvider {
     }
 
     func baseURL() async throws -> URL {
+        #if DEBUG
+        // Debug-only: a release build must never let a UserDefaults/env value redirect the bearer token.
         if let s = ProcessInfo.processInfo.environment["GROQ_BASE_URL"]
             ?? UserDefaults.standard.string(forKey: "volar.groqBaseURL"),
            let url = URL(string: s) {
             return url
         }
+        #endif
         return Self.groqProxyBaseURL
     }
 

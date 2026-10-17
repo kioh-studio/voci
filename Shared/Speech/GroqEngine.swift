@@ -97,8 +97,10 @@ final class GroqEngine: SpeechEngine {
             AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue
         ]
         do {
+            try RecordingAudioSession.activate()
             let rec = try AVAudioRecorder(url: url, settings: settings)
             guard rec.record() else {
+                RecordingAudioSession.deactivate()
                 onError?(GroqTranscriptionError.network("Recorder failed to start"))
                 return
             }
@@ -107,6 +109,7 @@ final class GroqEngine: SpeechEngine {
             isRunning = true
             session += 1
         } catch {
+            RecordingAudioSession.deactivate()
             onError?(error)
         }
     }
@@ -116,6 +119,7 @@ final class GroqEngine: SpeechEngine {
         isRunning = false
         recorder?.stop()
         recorder = nil
+        RecordingAudioSession.deactivate()
         guard let url = fileURL else { return }
         fileURL = nil
         session += 1
@@ -189,6 +193,7 @@ final class GroqEngine: SpeechEngine {
         isRunning = false
         recorder?.stop()
         recorder = nil
+        RecordingAudioSession.deactivate()
         if let url = fileURL {
             fileURL = nil
             try? FileManager.default.removeItem(at: url)

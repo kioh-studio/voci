@@ -217,9 +217,11 @@ enum RewardRules {
         return (grant.kind == .grant && allGoalsDone) ? .unlocked : .locked
     }
 
-    /// G2: a goal is done when it has tasks and every one is done.
-    static func isGoalDone(_ goal: RewardItem, doneTaskIds: Set<UUID>) -> Bool {
-        !goal.taskIds.isEmpty && goal.taskIds.allSatisfy { doneTaskIds.contains($0) }
+    /// G2: a goal is done when it has tasks and every one still-existing task is done. Task ids
+    /// no longer in `knownTaskIds` (deleted) are ignored; a goal with no known tasks is not done.
+    static func isGoalDone(_ goal: RewardItem, doneTaskIds: Set<UUID>, knownTaskIds: Set<UUID>) -> Bool {
+        let live = goal.taskIds.filter { knownTaskIds.contains($0) }
+        return !live.isEmpty && live.allSatisfy { doneTaskIds.contains($0) }
     }
 
     /// plan §2.3 + G3 — per goalId keep the newest grant (`updatedAt`; tie: larger

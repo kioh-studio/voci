@@ -10,7 +10,9 @@ enum RootTab: Hashable {
 
 struct RootTabView: View {
     @Environment(AppState.self) private var appState: AppState
+    @Environment(RewardCenter.self) private var rewardCenter
     @State private var selectedTab: RootTab = .now
+    @State private var unlockedGrant: RewardItem?
     /// Same key as `RewardCenter.isEnabled` and the Views toggle.
     @AppStorage("volar.view.goalRewards") private var goalRewardsOn = false
 
@@ -36,7 +38,6 @@ struct RootTabView: View {
                     .tag(RootTab.views)
             }
             .tint(IOSPalette.mint)
-            .onAppear(perform: configureTabBarAppearance)
 
             if selectedTab != .views {
                 MicFAB()
@@ -45,6 +46,11 @@ struct RootTabView: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: selectedTab)
+        // Hoisted from the Now tab so a goal finished from Goals/Views still offers its reward.
+        .sheet(item: $unlockedGrant) { grant in RewardUnlockedSheet(grant: grant) }
+        .onAppear(perform: checkUnlocked)
+        .onChange(of: appState.doneTasks.map(\.id)) { _, _ in checkUnlocked() }
+        .onChange(of: rewardCenter.grants) { _, _ in checkUnlocked() }
         .onChange(of: goalRewardsOn) { _, on in
             if !on && selectedTab == .goals { selectedTab = .now }
         }
@@ -81,7 +87,19 @@ struct RootTabView: View {
         }
     }
 
-    private func configureTabBarAppearance() {
+    private func checkUnlocked() {
+        guard rewardCenter.isEnabled, unlockedGrant == nil else { return }
+        let hit = rewardCenter.grants.first {
+            !rewardCenter.offeredGrantIDs.contains($0.id)
+                && rewardCenter.state(of: $0, tasks: appState.tasks) == .unlocked
+        }
+        guard let hit else { return }
+        // Mark offered now so a swipe-dismiss (no button) never re-presents it.
+        rewardCenter.dismissUnlocked(hit.id)
+        unlockedGrant = hit
+    }
+
+    static func configureTabBarAppearance() {
         let appearance = UITabBarAppearance()
         appearance.configureWithTransparentBackground()
         appearance.backgroundColor = UIColor(IOSPalette.tabBarBg)

@@ -5,8 +5,8 @@
 // which meant a brand-new user had no visible way to ever reach cloud speech/parsing or a Pro
 // purchase. Rather than write a SECOND copy of the email-OTP form for the new `SignInSheet` (opened
 // from the main window's toolbar, and from `PaywallView`'s "Sign in to subscribe" CTA), this view
-// is that form, lifted out verbatim so it now exists in exactly one place. `SettingsView.
-// signedOutAccountBody` was updated to embed this same view instead of keeping its own copy.
+// is that form, lifted out verbatim. The macOS `SettingsView.signedOutAccountBody` embeds this view;
+// iOS keeps its own copy in `SettingsIOSView`.
 //
 // Sign in with Apple was removed from Volar entirely on 2026-07-27 — email OTP (one-time 6-digit
 // code) is the ONLY sign-in method left. Nothing here should ever grow an Apple/ASAuthorization
@@ -44,6 +44,12 @@ struct EmailSignInForm: View {
                     .background(VolarColor.surfaceHi)
                     .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                     .volarHairline(cornerRadius: 5)
+                    .autocorrectionDisabled()
+                    #if os(iOS)
+                    .textContentType(.emailAddress)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    #endif
                 pillButton("Send code") {
                     // Optimistic flip, same as the form this was extracted from: the second field
                     // appears immediately on tap rather than waiting for the network round trip —
@@ -66,6 +72,10 @@ struct EmailSignInForm: View {
                         .background(VolarColor.surfaceHi)
                         .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                         .volarHairline(cornerRadius: 5)
+                        .textContentType(.oneTimeCode)
+                        #if os(iOS)
+                        .keyboardType(.numberPad)
+                        #endif
                     pillButton("Verify", solid: true) {
                         appState.verifyEmailOTP(email: emailInput, code: codeInput)
                     }

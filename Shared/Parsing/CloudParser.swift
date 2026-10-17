@@ -16,32 +16,16 @@ import Foundation
 
 // MARK: - Credential provider (injected — mirrors GroqCredentialProvider)
 
-/// Exactly one of these becomes exactly one HTTP header on the `/parse` request, per
-/// `parse-proxy.md` + the real server (`_shared/auth.ts`: "exactly one of Authorization /
-/// X-Device-Token required").
+/// The single auth shape for `/parse`: `Authorization: Bearer <supabase access_token>`. The server
+/// looks up the tier by `user_id`, so the client never decides free vs Pro.
 enum ParseAuthHeader: Sendable, Equatable {
-    /// `Authorization: Bearer <jws>` — paid tier, unmetered (soft rate-limited server-side).
-    /// ASSUMPTION flagged for the StoreKit owner (matches `supabase/README.md`'s own flagged
-    /// assumption): `jws` must be a `Transaction.jwsRepresentation` from
-    /// `Transaction.currentEntitlements` (proof of an ACTIVE purchase — carries
-    /// `originalTransactionId`, which the server hashes into its rate-limit key), NOT an
-    /// `AppTransaction.jwsRepresentation` (proof of install only, no transaction id). If the
-    /// concrete `ParseCredentialProvider` sends the wrong JWS type, the server will 401 every
-    /// paid request — reconcile against the StoreKit provider before shipping.
-    case paidJWS(String)
-    /// `X-Device-Token: <token>` — free tier, metered server-side (daily counter). `token` MUST
-    /// already be the fully-encoded header value: base64url(JSON{keyId, assertion,
-    /// clientDataHashB64}) — see `DeviceCheckProvider.swift`, which is the only file that should
-    /// ever construct this string. `CloudParser` treats it as an opaque string.
-    case freeDeviceToken(String)
+    case bearer(String)
 }
 
 /// Supplies the parse-proxy base URL + per-request auth, injected so this file never hardcodes a
 /// project URL or holds a secret directly — mirrors `GroqCredentialProvider`'s split of
-/// `baseURL()`/`authorization()`. Concrete implementation is the StoreKit/DeviceCheck owner's
-/// composite (NOT built in this file): it decides paid-vs-free by checking entitlement state,
-/// then either returns a cached/fetched StoreKit JWS (`.paidJWS`) or calls into a
-/// `DeviceAttestationProvider` (`DeviceCheckProvider.swift`, T023) for `.freeDeviceToken`.
+/// `baseURL()`/`authorization()`. The concrete implementation is `ConfigParseCredentialProvider`
+/// (account access token as `.bearer`).
 ///
 /// ASSUMPTION for the reviewer to check against that work: `authHeader()` returning `nil` is the
 /// ONLY signal `CloudParser` uses for "no credential available right now" — it must never throw
@@ -64,7 +48,7 @@ protocol ParseCredentialProvider: Sendable {
 /// 429 "gentle note" (FR-012) signal reaches the router without changing the frozen return type.
 enum CloudParseOutcome: Sendable, Equatable {
     case tasks([ParsedTask])
-    /// 429 `{ reason: "quota", resetAt }`. `resetAt` is best-effort (nil if absent/malformed).
+    /// 429 `{ error, resetAt }`. `resetAt` is best-effort (nil if absent/malformed).
     case quotaExceeded(resetAt: Date?)
     /// Any other non-200 (401 invalid/expired auth, 403, 4xx, 5xx, `config_missing` 503,
     /// `upstream_error` 502), transport failure (offline/DNS/TLS/timeout), or a response that
@@ -332,7 +316,7 @@ struct CloudParser: Sendable {
             "client_caps": [Self.taskRefsCapability, Self.cuesCapability],
         ]
         if !openTaskTitles.isEmpty {
-            payload["open_task_titles"] = Array(openTaskTitles.prefix(100)).map { Self.utf16Prefix($0, 200) }
+            payload["open_task_titles"] = Array(openTaskTitles.prefix(100)).map { Self.utf16Prefix($0, 200) }.filter { !$0.isEmpty }
         }
         // `timezone`: parse mode ONLY (locked contract — `resolveCompletion` below deliberately
         // does NOT send this; the server only reads it in parse mode). IANA identifier, gated
@@ -561,7 +545,7 @@ struct CloudParser: Sendable {
         // — this wire field is the same shape (a list of open-task titles), just under the locked
         // `candidates` name for this mode. `boundedCandidates.count` is what `matchIndex` gets
         // validated against below, so this MUST be the exact list actually sent on the wire.
-        let boundedCandidates = Array(candidates.prefix(100)).map { Self.utf16Prefix($0, 200) }
+        let boundedCandidates = Array(candidates.prefix(100)).map { Self.utf16Prefix($0, 200) }.filter { !$0.isEmpty }
 
         let payload: [String: Any] = [
             "mode": "resolve_completion",
@@ -644,10 +628,8 @@ struct CloudParser: Sendable {
         request.timeoutInterval = timeout
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         switch header {
-        case .paidJWS(let jws):
-            request.setValue("Bearer \(jws)", forHTTPHeaderField: "Authorization")
-        case .freeDeviceToken(let token):
-            request.setValue(token, forHTTPHeaderField: "X-Device-Token")
+        case .bearer(let token):
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         // Text-only body: `jsonPayload` is built exclusively from `String`/`Date`-derived values
         // above (transcript, ISO8601 timestamp, titles, task_title, notes) — there is no audio
@@ -657,7 +639,7 @@ struct CloudParser: Sendable {
     }
 
     private struct QuotaResponse: Decodable {
-        var reason: String
+        var error: String?
         var resetAt: String?
     }
 

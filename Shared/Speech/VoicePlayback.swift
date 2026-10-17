@@ -44,7 +44,7 @@ final class VoicePlayback {
             try session.setCategory(.playback, mode: .default)
             try session.setActive(true)
         } catch {
-            print("[Volar.VoicePlayback] AVAudioSession activation failed: \(error.localizedDescription)")
+            // best-effort: speech simply plays on the current session
         }
     }
     #endif

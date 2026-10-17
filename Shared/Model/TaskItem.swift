@@ -168,12 +168,20 @@ struct TaskItem: Identifiable, Sendable, Equatable {
     /// Derived: "45 min" / "1 hr" / "1h 30m" — matches the prototype's `dur` label.
     var durationLabel: String? {
         guard let durationMinutes, durationMinutes > 0 else { return nil }
-        if durationMinutes < 60 { return "\(durationMinutes) min" }
-        let hours = durationMinutes / 60
-        let minutes = durationMinutes % 60
-        if minutes == 0 { return hours == 1 ? "1 hr" : "\(hours) hrs" }
-        return "\(hours)h \(minutes)m"
+        return Self.durationLabel(minutes: durationMinutes)
     }
+
+    /// "45 min", "1 hr", "1h 30m" — shared by every view that shows a duration.
+    static func durationLabel(minutes: Int) -> String {
+        if minutes < 60 { return "\(minutes) min" }
+        let hours = minutes / 60
+        let remainder = minutes % 60
+        if remainder == 0 { return hours == 1 ? "1 hr" : "\(hours) hrs" }
+        return "\(hours)h \(remainder)m"
+    }
+
+    /// Duration menu presets (minutes).
+    static let durationPresetMinutes: [Int] = [5, 10, 15, 30, 45, 60, 90, 120, 180, 240]
 
     /// The only bridge into the pure selection engine (contracts/volarcore-api.md): maps this UI
     /// struct into the small value type `nextTask(from:now:calendar:)` actually consumes. No selection

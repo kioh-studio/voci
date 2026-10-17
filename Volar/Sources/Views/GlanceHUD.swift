@@ -21,9 +21,8 @@
 // tell you the truth in one second. The eyebrow carries the focus countdown when a session is
 // running (a real number) and nothing otherwise.
 //
-// PALETTE: uses `VolarColor` as it stands today (dark-only Graphite). The "Volar Paper" dual-theme
-// pass has not landed; when it does and those tokens become dynamic, this view follows for free
-// because it names tokens and never a literal. Do not hardcode a light-mode color here first.
+// PALETTE: uses the dynamic (light/dark) `VolarColor` tokens; it names tokens and never a literal,
+// so it follows the theme for free. Do not hardcode a color here.
 //
 // UNVERIFIED: written on Windows with no Swift toolchain. Not compiled, not run.
 import SwiftUI

@@ -41,7 +41,7 @@ struct GoalNewSheet: View {
                         .foregroundStyle(IOSPalette.fg)
                         .submitLabel(.done)
                         .padding(.horizontal, 14)
-                        .frame(height: 48)
+                        .frame(minHeight: 48)
                         .background(IOSPalette.bg2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(IOSPalette.border, lineWidth: 1))
                     SectionLabel("Tasks").padding(.top, 6)
@@ -116,15 +116,30 @@ struct RewardPickerSheet: View {
         rewardCenter.goals.filter { $0.id != goalId }
     }
 
+    /// "No reward" detaches only this goal; it never carries the "Also needs" goals along.
+    private var chosenGoalIds: [UUID] {
+        guard selectedId != nil else { return [goalId] }
+        return [goalId] + otherGoals.map(\.id).filter { others.contains($0) }
+    }
+
+    private var changed: Bool {
+        let current = rewardCenter.grant(forGoal: goalId)
+        guard selectedId != nil else { return current != nil }
+        return current?.rewardId != selectedId || Set(current?.goalIds ?? []) != Set(chosenGoalIds)
+    }
+
+    private func save() {
+        if changed { rewardCenter.attachReward(selectedId, toGoals: chosenGoalIds) }
+        dismiss()
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             SheetHeader(
                 title: "Reward", leading: "Cancel", trailing: "Save",
                 onLeading: { dismiss() },
-                onTrailing: {
-                    rewardCenter.attachReward(selectedId, toGoals: [goalId] + otherGoals.map(\.id).filter { others.contains($0) })
-                    dismiss()
-                }
+                onTrailing: save,
+                trailingEnabled: changed
             )
             .padding(.top, 8)
             ScrollView {
@@ -145,7 +160,7 @@ struct RewardPickerSheet: View {
                             selectedId = nil
                         }
                     }
-                    if !otherGoals.isEmpty {
+                    if selectedId != nil && !otherGoals.isEmpty {
                         SectionLabel("Also needs").padding(.top, 6)
                         GroupedCard {
                             ForEach(Array(otherGoals.enumerated()), id: \.element.id) { index, goal in
@@ -234,7 +249,6 @@ struct RewardPickerSheet: View {
 struct RewardNewSheet: View {
     var onAdded: ((RewardItem) -> Void)? = nil
 
-    @Environment(AppState.self) private var appState
     @Environment(RewardCenter.self) private var rewardCenter
     @Environment(\.dismiss) private var dismiss
 
@@ -286,7 +300,7 @@ struct RewardNewSheet: View {
                     }
                     .padding(.leading, 14)
                     .padding(.trailing, 4)
-                    .frame(height: 48)
+                    .frame(minHeight: 48)
                     .background(IOSPalette.bg2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(IOSPalette.border, lineWidth: 1))
 
@@ -393,34 +407,27 @@ struct RewardUnlockedSheet: View {
                 .font(IOSFont.mono(11))
                 .foregroundStyle(IOSPalette.fg3)
                 .lineLimit(1)
-            if let title = grant.title {
-                Text("You earned it.")
-                    .font(IOSFont.ui(24, .semibold))
-                    .foregroundStyle(IOSPalette.fg)
-                RewardChip(title: title, minutes: grant.minutes, icon: grant.icon, highlighted: true)
-                Spacer(minLength: 4)
+            let title = grant.title ?? "Reward"
+            Text("You earned it.")
+                .font(IOSFont.ui(24, .semibold))
+                .foregroundStyle(IOSPalette.fg)
+            RewardChip(title: title, minutes: grant.minutes, icon: grant.icon, highlighted: true)
+            Spacer(minLength: 4)
+            // Task state can change while the sheet is up (e.g. a task re-opened): re-check.
+            if rewardCenter.state(of: grant, tasks: appState.tasks) == .unlocked {
                 PrimaryButton("Start timer") {
                     rewardCenter.startBreak(grant.id)
                     dismiss()
                 }
-                SecondaryButton("Save it for later") {
-                    rewardCenter.dismissUnlocked(grant.id)
-                    dismiss()
-                }
-                Text("The timer runs on this iPhone. We'll call you back to Now.")
-                    .font(IOSFont.meta)
-                    .foregroundStyle(IOSPalette.fg3)
-                    .multilineTextAlignment(.center)
-            } else {
-                Text("Nice. That was a goal.")
-                    .font(IOSFont.ui(24, .semibold))
-                    .foregroundStyle(IOSPalette.fg)
-                Spacer(minLength: 4)
-                PrimaryButton("Done") {
-                    rewardCenter.dismissUnlocked(grant.id)
-                    dismiss()
-                }
             }
+            SecondaryButton(rewardCenter.state(of: grant, tasks: appState.tasks) == .unlocked ? "Save it for later" : "Close") {
+                rewardCenter.dismissUnlocked(grant.id)
+                dismiss()
+            }
+            Text("The timer runs on this iPhone. We'll call you back to Now.")
+                .font(IOSFont.meta)
+                .foregroundStyle(IOSPalette.fg3)
+                .multilineTextAlignment(.center)
         }
         .padding(.horizontal, IOSLayout.screenPadH)
         .padding(.bottom, 16)
